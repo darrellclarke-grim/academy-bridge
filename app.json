@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Tactical Playbook & Matchday",
+    "slug": "tactical-playbook-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a192f"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yourclub.tacticalplaybook",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a192f"
+      },
+      "package": "com.yourclub.tacticalplaybook"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "60186a0a-1281-42c3-b417-a5684e2bab85"
+      }
+    },
+    "owner": "darrellclarke",
+    "plugins": [
+      "expo-sharing"
+    ]
+  }
+}
