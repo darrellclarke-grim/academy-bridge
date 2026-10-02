@@ -45,12 +45,10 @@ import TafeModal from '../modals/TafeModal';
 
 // Screens
 import CoachHubScreen from '../screens/CoachHubScreen';
-import CustomTrainingScreen from '../screens/CustomTrainingScreen';
 import LineupScreen from '../screens/LineupScreen';
 import LiveMatchScreen from '../screens/LiveMatchScreen';
 import PlayerProfileScreen from '../screens/PlayerProfileScreen';
 import TeamSheetScreen from '../screens/TeamSheetScreen';
-import TrainingScreen from '../screens/TrainingScreen';
 
 // Global Zustand Matchday Store
 import { useMatchdayStore } from '../store/useMatchdayStore';
@@ -99,7 +97,7 @@ export default function App() {
   const [familyCodeInput, setFamilyCodeInput] = useState('');
 
   // App Layout State
-  const [appMode, setAppMode] = useState('coach'); 
+  const [appMode, setAppMode] = useState('coach'); // 'coach' | 'parent' | 'player'
   const [currentTab, setCurrentTab] = useState('coachHub'); 
   const [playerTab, setPlayerTab] = useState('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -295,8 +293,6 @@ export default function App() {
         if (mainDrills.length > 0) setSelectedDrill2(mainDrills[0]);
         if (ssgs.length > 0) setSelectedSSG(ssgs[0]);
 
-        console.log(`✅ Loaded ${mappedDrills.length} Training Drills from database.`);
-
         const { data: currData } = await supabase.from('season_curriculum').select('*').order('week_number', { ascending: true });
 
         if (currData && currData.length > 0) {
@@ -327,7 +323,6 @@ export default function App() {
           });
 
           setSeasonCurriculum(builtCurriculum);
-          console.log(`✅ Loaded ${Object.keys(builtCurriculum).length}-Week Season Curriculum.`);
         }
       }
 
@@ -398,14 +393,13 @@ export default function App() {
         };
 
         setTacticalManual(builtManual);
-        console.log(`✅ Loaded ${quizzesData.length} Tactical Quizzes across ${rolesData.length} roles.`);
       }
     } catch (err) {
       console.error("Critical Error fetching cloud data:", err);
     }
   };
 
- useEffect(() => {
+  useEffect(() => {
     fetchCloudData();
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -462,9 +456,6 @@ export default function App() {
         .eq('id', activeTeamId)
         .single()
         .then(({ data, error }) => {
-          if (error) {
-            console.error("❌ Fetch Team URL Error:", error.message);
-          }
           if (data) {
             setFaLeagueUrl(data.fa_league_table_url || '');
             if (data.age_group) setTeamAgeGroup(data.age_group);
@@ -1464,7 +1455,7 @@ export default function App() {
 
   async function fetchTeamData(userId, teamId) {
     if (!teamId) return;
-    const { data: allPlayers } = await supabase.from('players').select('*').eq('team_id', teamId).order('squad_number', { ascending: true });
+    const { data: allPlayers } = await supabase.from('players').select('*').eq('team_id', teamId).order('name', { ascending: true });
     const resolvedPlayers = allPlayers || [];
     setTeamSheet(resolvedPlayers);
 
@@ -1475,7 +1466,7 @@ export default function App() {
     const { data: links } = await supabase.from('parent_players').select('player_id').eq('parent_id', userId);
     if (links && links.length > 0) {
       const linkedIds = links.map(l => l.player_id);
-      const { data: children } = await supabase.from('players').select('*').in('id', linkedIds).eq('team_id', teamId);
+      const { data: children } = await supabase.from('players').select('*').in('id', linkedIds).eq('team_id', teamId).order('name', { ascending: true });
       setMyLinkedPlayers(children || []);
       if (children && children.length > 0) setMyChildId(children[0].id);
     } else {
@@ -1819,7 +1810,8 @@ export default function App() {
       {/* SCREEN ROUTER VIEWER */}
       <View style={styles.screenViewer}>
 
-        {currentTab === 'player' && (
+        {/* PLAYER & PARENT PROFILE VIEW */}
+        {(currentTab === 'player' || currentTab === 'profiles') && appMode !== 'coach' && (
           <PlayerProfileScreen
             myLinkedPlayers={myLinkedPlayers}
             teamSheet={teamSheet}
@@ -1865,56 +1857,40 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'profiles' && (
+        {/* COACH PROFILES LIST */}
+        {currentTab === 'profiles' && appMode === 'coach' && (
           <View style={{ flex: 1 }}>
             <View style={styles.headerRow}>
               <View>
                 <Text style={styles.headerSub}>Development Center</Text>
                 <Text style={styles.headerTitle}>Player Profiles</Text>
               </View>
-              {appMode === 'coach' && (
-                <TouchableOpacity style={styles.addPlayerBtn} onPress={() => setIsAddPlayerModalOpen(true)}>
-                  <Text style={styles.addPlayerBtnText}>➕ Add Player</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity style={styles.addPlayerBtn} onPress={() => setIsAddPlayerModalOpen(true)}>
+                <Text style={styles.addPlayerBtnText}>➕ Add Player</Text>
+              </TouchableOpacity>
             </View>
 
             <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
-              {(teamSheet || []).map(p => {
-                if (!p) return null;
-                return (
-                  <TouchableOpacity key={p.id} style={styles.card} onPress={() => { if(appMode === 'coach') setEditingPlayer(p); }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <View>
-                        <Text style={styles.roleTitle}>#{p.squad_number || '0'} {p.name}</Text>
-                        <Text style={styles.roleSubTitle}>
-                          Primary: <Text style={{ color: '#39FF14' }}>{p.position || 'TBD'}</Text> | Secondary: <Text style={{ color: '#3b82f6' }}>{p.secondary_position || 'None'}</Text>
-                        </Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                          <Text style={styles.miniLabel}>Foot: </Text>
-                          <View style={{ flexDirection: 'row', gap: 4, marginLeft: 5 }}>
-                            {[1, 2, 3, 4, 5].map(val => (
-                              <View key={val} style={[styles.footDotSmall, p.footedness === val && styles.footDotSmallActive]} />
-                            ))}
-                          </View>
-                        </View>
-                      </View>
-                      {appMode === 'coach' && (
-                        <View style={styles.editProfileBtn}>
-                          <Text style={styles.editProfileBtnText}>View/Edit Profile</Text>
-                        </View>
-                      )}
+              {(teamSheet || []).map(p => p && (
+                <TouchableOpacity key={p.id} style={styles.card} onPress={() => setEditingPlayer(p)}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View>
+                      <Text style={styles.roleTitle}>#{p.squad_number || '0'} {p.name}</Text>
+                      <Text style={styles.roleSubTitle}>
+                        Primary: <Text style={{ color: '#39FF14' }}>{p.position || 'TBD'}</Text> | Secondary: <Text style={{ color: '#3b82f6' }}>{p.secondary_position || 'None'}</Text>
+                      </Text>
                     </View>
-                    <View style={styles.divider} />
-                    <Text style={styles.inputLabel}>Weaknesses to Improve:</Text>
-                    <Text style={styles.bulletText} numberOfLines={2}>{p.notes_weaknesses || 'No data recorded.'}</Text>
-                  </TouchableOpacity>
-                );
-              })}
+                    <View style={styles.editProfileBtn}>
+                      <Text style={styles.editProfileBtnText}>View/Edit Profile</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
             </ScrollView>
           </View>
         )}
 
+        {/* COACH HUB */}
         {currentTab === 'coachHub' && (
           <CoachHubScreen
             matchHistory={matchHistory}
@@ -1934,32 +1910,7 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'training' && (
-          <TrainingScreen
-            isTrainingRegisterExpanded={isTrainingRegisterExpanded}
-            setIsTrainingRegisterExpanded={setIsTrainingRegisterExpanded}
-            teamSheet={teamSheet}
-            trainingRegister={trainingRegister}
-            setTrainingRegister={setTrainingRegister}
-            submitTrainingSession={submitTrainingSession}
-            selectedWeek={selectedWeek}
-            setSelectedWeek={setSelectedWeek}
-            activeWeekData={activeWeekData}
-            openDrillVideo={openDrillVideo}
-          />
-        )}
-
-        {currentTab === 'customTraining' && (
-          <CustomTrainingScreen
-            setDrillSelectorMode={setDrillSelectorMode}
-            selectedWarmup={selectedWarmup}
-            selectedDrill1={selectedDrill1}
-            selectedDrill2={selectedDrill2}
-            selectedSSG={selectedSSG}
-            openDrillVideo={openDrillVideo}
-          />
-        )}
-
+        {/* LIVE MATCH (COACH MODE) */}
         {currentTab === 'liveMatch' && (
           <LiveMatchScreen
             appMode={appMode}
@@ -1973,6 +1924,7 @@ export default function App() {
           />
         )}
 
+        {/* LINEUP SCREEN (ALL MODES) */}
         {currentTab === 'lineup' && (
           <LineupScreen
             activeFormation={activeFormation}
@@ -1996,6 +1948,7 @@ export default function App() {
           />
         )}
 
+        {/* STATS / TEAM SHEET (ALL MODES) */}
         {currentTab === 'teamSheet' && (
           <TeamSheetScreen
             profile={profile}
@@ -2012,24 +1965,49 @@ export default function App() {
       <View style={styles.bottomNav}>
         {(appMode === 'player' || appMode === 'parent') && (
           <>
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('player')}><Text style={[styles.navIcon, currentTab === 'player' && styles.activeNav]}>⚽</Text><Text style={[styles.navText, currentTab === 'player' && styles.activeNav]}>My Profile</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('player')}>
+              <Text style={[styles.navIcon, currentTab === 'player' && styles.activeNav]}>⚽</Text>
+              <Text style={[styles.navText, currentTab === 'player' && styles.activeNav]}>My Profile</Text>
+            </TouchableOpacity>
             
-            {teamAgeGroup !== 'Adult' && (
-              <>
-                <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('lineup')}><Text style={[styles.navIcon, currentTab === 'lineup' && styles.activeNav]}>🛡️</Text><Text style={[styles.navText, currentTab === 'lineup' && styles.activeNav]}>Lineup</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('teamSheet')}><Text style={[styles.navIcon, currentTab === 'teamSheet' && styles.activeNav]}>📊</Text><Text style={[styles.navText, currentTab === 'teamSheet' && styles.activeNav]}>Stats</Text></TouchableOpacity>
-              </>
-            )}
+            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('lineup')}>
+              <Text style={[styles.navIcon, currentTab === 'lineup' && styles.activeNav]}>🛡️</Text>
+              <Text style={[styles.navText, currentTab === 'lineup' && styles.activeNav]}>Lineup</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('teamSheet')}>
+              <Text style={[styles.navIcon, currentTab === 'teamSheet' && styles.activeNav]}>📊</Text>
+              <Text style={[styles.navText, currentTab === 'teamSheet' && styles.activeNav]}>Stats</Text>
+            </TouchableOpacity>
           </>
         )}
 
         {appMode === 'coach' && (
           <>
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('profiles')}><Text style={[styles.navIcon, currentTab === 'profiles' && styles.activeNav]}>👤</Text><Text style={[styles.navText, currentTab === 'profiles' && styles.activeNav]}>Profiles</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('coachHub')}><Text style={[styles.navIcon, currentTab === 'coachHub' && styles.activeNav]}>📋</Text><Text style={[styles.navText, currentTab === 'coachHub' && styles.activeNav]}>Hub</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('liveMatch')}><Text style={[styles.navIcon, currentTab === 'liveMatch' && styles.activeNav]}>⏱️</Text><Text style={[styles.navText, currentTab === 'liveMatch' && styles.activeNav]}>Live</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('lineup')}><Text style={[styles.navIcon, currentTab === 'lineup' && styles.activeNav]}>🛡</Text><Text style={[styles.navText, currentTab === 'lineup' && styles.activeNav]}>Lineup</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('teamSheet')}><Text style={[styles.navIcon, currentTab === 'teamSheet' && styles.activeNav]}>📊</Text><Text style={[styles.navText, currentTab === 'teamSheet' && styles.activeNav]}>Stats</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('profiles')}>
+              <Text style={[styles.navIcon, currentTab === 'profiles' && styles.activeNav]}>👤</Text>
+              <Text style={[styles.navText, currentTab === 'profiles' && styles.activeNav]}>Profiles</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('coachHub')}>
+              <Text style={[styles.navIcon, currentTab === 'coachHub' && styles.activeNav]}>📋</Text>
+              <Text style={[styles.navText, currentTab === 'coachHub' && styles.activeNav]}>Hub</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('liveMatch')}>
+              <Text style={[styles.navIcon, currentTab === 'liveMatch' && styles.activeNav]}>⏱️</Text>
+              <Text style={[styles.navText, currentTab === 'liveMatch' && styles.activeNav]}>Live</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('lineup')}>
+              <Text style={[styles.navIcon, currentTab === 'lineup' && styles.activeNav]}>🛡️</Text>
+              <Text style={[styles.navText, currentTab === 'lineup' && styles.activeNav]}>Lineup</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('teamSheet')}>
+              <Text style={[styles.navIcon, currentTab === 'teamSheet' && styles.activeNav]}>📊</Text>
+              <Text style={[styles.navText, currentTab === 'teamSheet' && styles.activeNav]}>Stats</Text>
+            </TouchableOpacity>
           </>
         )}
       </View>
@@ -2712,6 +2690,7 @@ export default function App() {
     </SafeAreaView>
   );
 }
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B0E14' },
   screenViewer: { flex: 1 },

@@ -1,7 +1,7 @@
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function LineupScreen({
-  activeFormation,
+  activeFormation = '4-2-3-1',
   appMode,
   lineupViewMode,
   setLineupViewMode,
@@ -11,144 +11,153 @@ export default function LineupScreen({
   isLoadingSheet,
   squadDepthFilter,
   setSquadDepthFilter,
-  activeLayout,
+  activeLayout = [],
   renderDepthPosition,
   renderPosition,
-  subs,
+  subs = [],
   setLineupAssignPlayer,
   getFootednessString,
-  teamSheet,
-  currentAvailablePositions
+  teamSheet = [],
+  currentAvailablePositions = []
 }) {
+  const resolveTop = (node) => {
+    const val = node.top !== undefined ? node.top : node.y;
+    if (val === undefined) return '50%';
+    if (typeof val === 'number') return `${val}%`;
+    return String(val).endsWith('%') ? val : `${val}%`;
+  };
+
+  const resolveLeft = (node) => {
+    const val = node.left !== undefined ? node.left : node.x;
+    if (val === undefined) return '50%';
+    if (typeof val === 'number') return `${val}%`;
+    return String(val).endsWith('%') ? val : `${val}%`;
+  };
+
   return (
-    <View style={{ flex: 1 }}>
-      <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.headerSub}>System: {activeFormation}</Text>
-          <Text style={styles.headerTitle}>Match Day Lineup</Text>
-        </View>
+    <View style={styles.container}>
+      {/* HEADER */}
+      <View style={styles.header}>
+        <Text style={styles.headerSub}>SYSTEM: {activeFormation}</Text>
+        <Text style={styles.headerTitle}>Match Day Lineup</Text>
       </View>
 
+      {/* VIEW MODE TOGGLES */}
+      <View style={styles.toggleBar}>
+        <TouchableOpacity
+          style={[styles.toggleBtn, lineupViewMode === 'pitch' && styles.toggleBtnActive]}
+          onPress={() => setLineupViewMode && setLineupViewMode('pitch')}
+        >
+          <Text style={[styles.toggleBtnText, lineupViewMode === 'pitch' && styles.toggleBtnTextActive]}>
+            ⚽ Pitch Lineup
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.toggleBtn, lineupViewMode === 'depth' && styles.toggleBtnActive]}
+          onPress={() => setLineupViewMode && setLineupViewMode('depth')}
+        >
+          <Text style={[styles.toggleBtnText, lineupViewMode === 'depth' && styles.toggleBtnTextActive]}>
+            📊 Squad Depth
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* COACH-ONLY ACTION CONTROLS */}
       {appMode === 'coach' && (
-        <View style={{ flexDirection: 'row', backgroundColor: '#0a192f', borderBottomWidth: 1, borderBottomColor: '#233554' }}>
-          <TouchableOpacity 
-            style={[styles.subTab, lineupViewMode === 'pitch' && styles.activeSubTab]} 
-            onPress={() => setLineupViewMode('pitch')}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={styles.systemSelectBtn}
+            onPress={() => setIsFormationModalOpen && setIsFormationModalOpen(true)}
           >
-            <Text style={[styles.subTabText, lineupViewMode === 'pitch' && styles.activeSubTabText]}>⚽ Pitch Lineup</Text>
+            <Text style={styles.systemSelectText}>System: {activeFormation} (Change ▼)</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.subTab, lineupViewMode === 'depth' && styles.activeSubTab]} 
-            onPress={() => setLineupViewMode('depth')}
-          >
-            <Text style={[styles.subTabText, lineupViewMode === 'depth' && styles.activeSubTabText]}>📊 Squad Depth</Text>
-          </TouchableOpacity>
-        </View>
-      )}
 
-      {appMode === 'coach' && lineupViewMode === 'pitch' && (
-        <View style={styles.formationBar}>
-          <Text style={styles.formationBarLabel}>System:</Text>
-          <TouchableOpacity style={[styles.fmtBtn, styles.fmtBtnActive, { flex: 1, paddingVertical: 8, marginRight: 5 }]} onPress={() => setIsFormationModalOpen(true)}>
-            <Text style={[styles.fmtBtnText, styles.fmtBtnTextActive, { textAlign: 'center' }]}>{activeFormation} (Change ▼)</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[
-              styles.fmtBtn, 
-              { backgroundColor: '#10b981', borderColor: '#059669', flex: 1, paddingVertical: 8, marginLeft: 5 },
-              isTafeDisabled && { opacity: 0.5, backgroundColor: '#475569', borderColor: '#334155' }
-            ]} 
-            onPress={isTafeDisabled ? null : openTafeModal}
+          <TouchableOpacity
+            style={[styles.tafeBtn, isTafeDisabled && { opacity: 0.5 }]}
             disabled={isTafeDisabled}
+            onPress={openTafeModal}
           >
-            <Text style={[styles.fmtBtnText, styles.fmtBtnTextActive, { textAlign: 'center' }]}>
-              {isTafeDisabled ? '🔒 TAFE (Needs Data)' : '⚡ TAFE Auto-Fill'}
-            </Text>
+            <Text style={styles.tafeBtnText}>⚡ TAFE Auto-Fill</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      <ScrollView contentContainerStyle={{ padding: 15, alignItems: 'center' }} keyboardShouldPersistTaps="handled">
-        {isLoadingSheet ? (
-          <ActivityIndicator size="large" color="#f97316" style={{ marginTop: 100 }} />
-        ) : lineupViewMode === 'depth' ? (
+      <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
+        {lineupViewMode === 'pitch' ? (
           <>
-            <Text style={{ color: '#3b82f6', fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>
-              📊 Visual Squad Depth Map ({activeFormation})
+            <Text style={styles.instructionText}>
+              {appMode === 'coach'
+                ? 'Coach Mode: Tap any player on pitch or bench to reassign roles.'
+                : 'Matchday Tactical Pitch Setup'}
             </Text>
-            
-            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 15, backgroundColor: '#112240', padding: 6, borderRadius: 10, borderWidth: 1, borderColor: '#233554' }}>
-              <TouchableOpacity 
-                style={[
-                  styles.fmtBtn, 
-                  squadDepthFilter === 'primary' && { backgroundColor: '#f97316', borderColor: '#ea580c' },
-                  { paddingHorizontal: 12, paddingVertical: 6 }
-                ]} 
-                onPress={() => setSquadDepthFilter('primary')}
-              >
-                <Text style={[styles.fmtBtnText, squadDepthFilter === 'primary' && { color: '#ffffff' }]}>🎯 Primary Role Depth</Text>
-              </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={[
-                  styles.fmtBtn, 
-                  squadDepthFilter === 'secondary' && { backgroundColor: '#3b82f6', borderColor: '#2563eb' },
-                  { paddingHorizontal: 12, paddingVertical: 6 }
-                ]} 
-                onPress={() => setSquadDepthFilter('secondary')}
-              >
-                <Text style={[styles.fmtBtnText, squadDepthFilter === 'secondary' && { color: '#ffffff' }]}>🔄 Secondary Role Depth</Text>
-              </TouchableOpacity>
+            {/* TACTICAL PITCH GRAPHIC CONTAINER */}
+            <View style={styles.pitchGraphicBox}>
+              <View style={styles.pitchCenterCircle} />
+              <View style={styles.pitchHalfLine} />
+
+              {(activeLayout || []).map((node) => {
+                const topPos = resolveTop(node);
+                const leftPos = resolveLeft(node);
+                return renderPosition ? renderPosition(node.code, node.label, topPos, leftPos) : null;
+              })}
             </View>
 
-            <View style={[styles.pitch, { height: 460 }]}>
-              <View style={styles.halfwayLine} />
-              <View style={styles.centerCircle} />
-              {(activeLayout || []).map(node => renderDepthPosition(node.code, node.label, node.top, node.left))}
+            {/* BENCH LIST */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>SUBSTITUTES BENCH ({subs.length})</Text>
+              <View style={styles.benchGrid}>
+                {subs.length === 0 ? (
+                  <Text style={styles.emptyText}>No substitutes assigned to bench.</Text>
+                ) : (
+                  subs.map((p) => (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={styles.benchChip}
+                      onPress={() => appMode === 'coach' && setLineupAssignPlayer && setLineupAssignPlayer(p)}
+                    >
+                      <Text style={styles.benchPos}>SUB</Text>
+                      <Text style={styles.benchName} numberOfLines={1}>
+                        #{p.squad_number || 0} {p.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </View>
             </View>
           </>
         ) : (
           <>
-            <Text style={styles.editInstructions}>Coach Mode: Tap any player on pitch, bench, or squad to assign roles.</Text>
-            
-            <View style={styles.pitch}>
-              <View style={styles.halfwayLine} />
-              <View style={styles.centerCircle} />
-              {(activeLayout || []).map(node => renderPosition(node.code, node.label, node.top, node.left))}
+            {/* SQUAD DEPTH VIEW */}
+            <View style={styles.filterRow}>
+              <TouchableOpacity
+                style={[styles.filterBtn, squadDepthFilter === 'primary' && styles.filterBtnActive]}
+                onPress={() => setSquadDepthFilter && setSquadDepthFilter('primary')}
+              >
+                <Text style={[styles.filterBtnText, squadDepthFilter === 'primary' && styles.filterBtnTextActive]}>
+                  Primary Roles
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.filterBtn, squadDepthFilter === 'secondary' && styles.filterBtnActive]}
+                onPress={() => setSquadDepthFilter && setSquadDepthFilter('secondary')}
+              >
+                <Text style={[styles.filterBtnText, squadDepthFilter === 'secondary' && styles.filterBtnTextActive]}>
+                  Secondary Roles
+                </Text>
+              </TouchableOpacity>
             </View>
 
-            <View style={styles.listContainer}>
-              <Text style={styles.listTitle}>🔄 Substitutes ({(subs || []).length})</Text>
-              {(subs || []).map((p, index) => {
-                if (!p) return null;
-                return (
-                  <TouchableOpacity key={index} style={styles.benchCard} onPress={() => { if(appMode === 'coach') setLineupAssignPlayer(p); }}>
-                    <Text style={styles.benchName}>
-                      #{p.squad_number || ''} {p.name} 
-                      <Text style={{fontWeight: 'normal', color: '#64748b', fontSize: 12}}>
-                        {' '}({p.position || 'TBD'}{p.secondary_position && p.secondary_position !== 'None' ? ` / ${p.secondary_position}` : ''} | {getFootednessString(p.footedness)})
-                      </Text>
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <View style={styles.pitchGraphicBox}>
+              <View style={styles.pitchCenterCircle} />
+              <View style={styles.pitchHalfLine} />
 
-            <View style={styles.listContainer}>
-              <Text style={styles.listTitle}>👥 Squad Members</Text>
-              {(teamSheet || []).map((p, index) => {
-                if (!p) return null;
-                const isOutdatedStarter = p.is_starter && p.matchday_position && !currentAvailablePositions.includes(p.matchday_position.toUpperCase());
-                return (
-                  <TouchableOpacity key={index} style={[styles.benchCard, !p.available && { opacity: 0.5, borderColor: '#ef4444' }]} onPress={() => { if(appMode === 'coach') setLineupAssignPlayer(p); }}>
-                    <Text style={styles.benchName}>
-                      #{p.squad_number || ''} {p.name} 
-                      <Text style={{fontSize: 12, color: '#94a3b8'}}>
-                        {' '}({p.is_starter ? (isOutdatedStarter ? `⚠️ Invalid Slot (${p.matchday_position})` : `Starter: ${p.matchday_position}`) : p.available ? 'Sub' : 'Unavailable'} | {p.position}{p.secondary_position && p.secondary_position !== 'None' ? ` / ${p.secondary_position}` : ''} | {getFootednessString(p.footedness)})
-                      </Text>
-                    </Text>
-                  </TouchableOpacity>
-                );
+              {(activeLayout || []).map((node) => {
+                const topPos = resolveTop(node);
+                const leftPos = resolveLeft(node);
+                return renderDepthPosition ? renderDepthPosition(node.code, node.label, topPos, leftPos) : null;
               })}
             </View>
           </>
@@ -159,25 +168,44 @@ export default function LineupScreen({
 }
 
 const styles = StyleSheet.create({
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#112240', padding: 20, borderBottomWidth: 1, borderBottomColor: '#233554' },
-  headerSub: { color: '#f97316', fontWeight: 'bold', fontSize: 12, textTransform: 'uppercase' },
-  headerTitle: { color: '#ffffff', fontSize: 22, fontWeight: 'bold' },
-  subTab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
-  activeSubTab: { borderBottomWidth: 3, borderBottomColor: '#f97316' },
-  subTabText: { color: '#94a3b8', fontWeight: 'bold', fontSize: 11 },
-  activeSubTabText: { color: '#f97316' },
-  formationBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0f172a', paddingHorizontal: 15, paddingVertical: 8, gap: 8 },
-  formationBarLabel: { color: '#f97316', fontWeight: 'bold', fontSize: 12 },
-  fmtBtn: { backgroundColor: '#1e293b', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#334155', minWidth: 50, alignItems: 'center' },
-  fmtBtnActive: { backgroundColor: '#f97316', borderColor: '#f97316' },
-  fmtBtnText: { color: '#94a3b8', fontSize: 11, fontWeight: 'bold' },
-  fmtBtnTextActive: { color: '#ffffff' },
-  editInstructions: { color: '#f97316', fontWeight: 'bold', marginBottom: 15 },
-  pitch: { width: '100%', height: 420, backgroundColor: '#15803d', borderRadius: 10, borderWidth: 2, borderColor: '#ffffff', position: 'relative', marginBottom: 20 },
-  halfwayLine: { position: 'absolute', top: '50%', width: '100%', height: 2, backgroundColor: 'rgba(255,255,255,0.4)' },
-  centerCircle: { position: 'absolute', top: '50%', left: '50%', width: 60, height: 60, borderRadius: 30, borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)', transform: [{ translateX: -30 }, { translateY: -30 }] },
-  listContainer: { width: '100%', backgroundColor: '#112240', borderRadius: 10, padding: 15, marginBottom: 20, borderColor: '#233554', borderWidth: 1 },
-  listTitle: { color: '#ffffff', fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
-  benchCard: { backgroundColor: '#1e293b', padding: 12, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  benchName: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 }
+  container: { flex: 1, backgroundColor: '#0B0E14' },
+  header: { backgroundColor: '#1A1F26', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2E3A44' },
+  headerSub: { color: '#39FF14', fontWeight: 'bold', fontSize: 11, letterSpacing: 1 },
+  headerTitle: { color: '#FFFFFF', fontSize: 22, fontWeight: 'bold', marginTop: 2 },
+  toggleBar: { flexDirection: 'row', backgroundColor: '#1A1F26', borderBottomWidth: 1, borderBottomColor: '#2E3A44' },
+  toggleBtn: { flex: 1, paddingVertical: 12, alignItems: 'center' },
+  toggleBtnActive: { borderBottomWidth: 3, borderBottomColor: '#39FF14' },
+  toggleBtnText: { color: '#64748B', fontWeight: 'bold', fontSize: 13 },
+  toggleBtnTextActive: { color: '#FFFFFF' },
+  actionRow: { flexDirection: 'row', gap: 10, padding: 15, paddingBottom: 0 },
+  systemSelectBtn: { flex: 1, backgroundColor: '#0B0E14', padding: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#39FF14' },
+  systemSelectText: { color: '#39FF14', fontWeight: 'bold', fontSize: 12 },
+  tafeBtn: { flex: 1, backgroundColor: '#39FF14', padding: 12, borderRadius: 8, alignItems: 'center' },
+  tafeBtnText: { color: '#0B0E14', fontWeight: 'bold', fontSize: 12 },
+  content: { padding: 15 },
+  instructionText: { color: '#39FF14', fontSize: 12, fontWeight: 'bold', marginBottom: 12 },
+  pitchGraphicBox: {
+    backgroundColor: '#052E16',
+    height: 380,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#39FF14',
+    position: 'relative',
+    marginBottom: 15,
+    paddingHorizontal: 10
+  },
+  pitchCenterCircle: { position: 'absolute', top: '38%', left: '35%', width: 100, height: 100, borderRadius: 50, borderWidth: 1, borderColor: 'rgba(57, 255, 20, 0.3)' },
+  pitchHalfLine: { position: 'absolute', top: '50%', width: '100%', height: 1, backgroundColor: 'rgba(57, 255, 20, 0.3)' },
+  card: { backgroundColor: '#1A1F26', borderRadius: 12, padding: 16, marginBottom: 15, borderWidth: 1, borderColor: '#2E3A44' },
+  cardTitle: { color: '#39FF14', fontWeight: 'bold', fontSize: 12, letterSpacing: 0.5, marginBottom: 10 },
+  benchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  benchChip: { backgroundColor: '#0B0E14', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44', minWidth: '45%', flex: 1 },
+  benchPos: { color: '#94A3B8', fontSize: 10, fontWeight: 'bold' },
+  benchName: { color: '#CBD5E1', fontSize: 13, fontWeight: 'bold', marginTop: 2 },
+  emptyText: { color: '#64748B', fontSize: 12, fontStyle: 'italic' },
+  filterRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
+  filterBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#1A1F26', borderWidth: 1, borderColor: '#2E3A44', alignItems: 'center' },
+  filterBtnActive: { borderColor: '#39FF14', backgroundColor: '#1A1F26' },
+  filterBtnText: { color: '#94A3B8', fontSize: 12, fontWeight: 'bold' },
+  filterBtnTextActive: { color: '#39FF14' }
 });
