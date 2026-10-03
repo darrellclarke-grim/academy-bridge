@@ -519,6 +519,36 @@ export default function PlayerProfileScreen({
           <>
             {renderRadarChart()}
 
+            {/* COACH OBSERVATIONS & DEVELOPMENT NOTES */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>COACH OBSERVATIONS & DEVELOPMENT NOTES</Text>
+
+              {activePlayer?.notes_weaknesses ? (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={styles.sectionSubHeader}>🎯 AREAS FOR IMPROVEMENT</Text>
+                  <Text style={styles.bulletText}>{activePlayer.notes_weaknesses}</Text>
+                </View>
+              ) : null}
+
+              {activePlayer?.notes_communication ? (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={styles.sectionSubHeader}>🗣️ COMMUNICATION & LEADERSHIP</Text>
+                  <Text style={styles.bulletText}>{activePlayer.notes_communication}</Text>
+                </View>
+              ) : null}
+
+              {activePlayer?.notes_notes ? (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={styles.sectionSubHeader}>📝 GENERAL COACH NOTES</Text>
+                  <Text style={styles.bulletText}>{activePlayer.notes_notes}</Text>
+                </View>
+              ) : null}
+
+              {!activePlayer?.notes_weaknesses && !activePlayer?.notes_communication && !activePlayer?.notes_notes && (
+                <Text style={styles.emptyText}>No coach observations recorded yet for this player.</Text>
+              )}
+            </View>
+
             <View style={styles.card}>
               <Text style={styles.cardTitle}>DETAILED ATTRIBUTE BREAKDOWN</Text>
 
@@ -652,7 +682,7 @@ const styles = StyleSheet.create({
   radarDiamondShape: { width: 110, height: 110, transform: [{ rotate: '45deg' }], backgroundColor: 'rgba(57, 255, 20, 0.25)', borderWidth: 2, borderColor: '#39FF14' },
   radarLegendRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', width: '100%', borderTopWidth: 1, borderTopColor: '#2E3A44', paddingTop: 10 },
   legendText: { color: '#CBD5E1', fontSize: 11, fontWeight: 'bold' },
-  sectionSubHeader: { color: '#94A3B8', fontSize: 11, fontWeight: 'bold', letterSpacing: 0.5, marginBottom: 8 },
+  sectionSubHeader: { color: '#39FF14', fontSize: 11, fontWeight: 'bold', letterSpacing: 0.5, marginBottom: 6 },
 
   // RSVP
   rsvpBtn: { padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 10 },

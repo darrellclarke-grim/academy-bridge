@@ -45,10 +45,12 @@ import TafeModal from '../modals/TafeModal';
 
 // Screens
 import CoachHubScreen from '../screens/CoachHubScreen';
+import CustomTrainingScreen from '../screens/CustomTrainingScreen';
 import LineupScreen from '../screens/LineupScreen';
 import LiveMatchScreen from '../screens/LiveMatchScreen';
 import PlayerProfileScreen from '../screens/PlayerProfileScreen';
 import TeamSheetScreen from '../screens/TeamSheetScreen';
+import TrainingScreen from '../screens/TrainingScreen';
 
 // Global Zustand Matchday Store
 import { useMatchdayStore } from '../store/useMatchdayStore';
@@ -469,7 +471,6 @@ export default function App() {
       fetchSeasonReports(activeTeamId);
     }
   }, [activeTeamId]);
-
   useEffect(() => {
     let interval;
     if ((matchPhase === '1ST HALF' || matchPhase === '2ND HALF') && matchStartTimestamp) {
@@ -1759,7 +1760,6 @@ export default function App() {
       </TouchableOpacity>
     );
   }
-
   // MAIN APP LAYOUT
   return (
     <SafeAreaView style={styles.container}>
@@ -1959,6 +1959,34 @@ export default function App() {
           />
         )}
 
+        {/* TRAINING CENTER */}
+        {currentTab === 'training' && (
+          <TrainingScreen
+            isTrainingRegisterExpanded={isTrainingRegisterExpanded}
+            setIsTrainingRegisterExpanded={setIsTrainingRegisterExpanded}
+            teamSheet={teamSheet}
+            trainingRegister={trainingRegister}
+            setTrainingRegister={setTrainingRegister}
+            submitTrainingSession={submitTrainingSession}
+            selectedWeek={selectedWeek}
+            setSelectedWeek={setSelectedWeek}
+            activeWeekData={activeWeekData}
+            openDrillVideo={openDrillVideo}
+          />
+        )}
+
+        {/* CUSTOM TRAINING PLANNER */}
+        {currentTab === 'customTraining' && (
+          <CustomTrainingScreen
+            setDrillSelectorMode={setDrillSelectorMode}
+            selectedWarmup={selectedWarmup}
+            selectedDrill1={selectedDrill1}
+            selectedDrill2={selectedDrill2}
+            selectedSSG={selectedSSG}
+            openDrillVideo={openDrillVideo}
+          />
+        )}
+
       </View>
 
       {/* BOTTOM NAVIGATION */}
@@ -2011,6 +2039,7 @@ export default function App() {
           </>
         )}
       </View>
+
       {/* MODALS & OVERLAYS */}
 
       <MatchArchiveModal

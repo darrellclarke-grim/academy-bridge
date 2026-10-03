@@ -17,10 +17,10 @@ export default function MatchArchiveModal({
 }) {
   return (
     <Modal visible={visible} animationType="slide">
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#0a192f' }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#233554' }}>
-          <Text style={{ color: '#f97316', fontSize: 18, fontWeight: 'bold' }}>📜 Past Match Reports</Text>
-          <TouchableOpacity onPress={onClose} style={{ backgroundColor: '#1e293b', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#334155' }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0E14' }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: '#1A1F26', borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
+          <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>📜 Past Match Reports</Text>
+          <TouchableOpacity onPress={onClose} style={{ backgroundColor: '#0B0E14', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44' }}>
             <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>Close Archive</Text>
           </TouchableOpacity>
         </View>
@@ -45,20 +45,20 @@ export default function MatchArchiveModal({
                 <Text style={{ color: '#64748b', fontSize: 11, marginBottom: 10 }}>Logged: {new Date(m.created_at || Date.now()).toLocaleDateString()}</Text>
                 
                 <View style={styles.divider} />
-                <Text style={{ color: '#f97316', fontSize: 12, fontWeight: 'bold', marginBottom: 6 }}>Match Ticker Feed Log:</Text>
+                <Text style={{ color: '#39FF14', fontSize: 12, fontWeight: 'bold', marginBottom: 6 }}>Match Ticker Feed Log:</Text>
                 {(!m.ticker_events || m.ticker_events.length === 0) ? (
                   <Text style={[styles.bulletText, { fontSize: 12, color: '#64748b' }]}>No detailed ticker feed saved for this match.</Text>
                 ) : (
                   m.ticker_events.map((evt, eIdx) => (
-                    <View key={eIdx} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1e293b' }}>
+                    <View key={eIdx} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#0B0E14' }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                        <Text style={{ color: '#f97316', fontWeight: 'bold', width: 35, fontSize: 11 }}>{evt.minute}</Text>
+                        <Text style={{ color: '#39FF14', fontWeight: 'bold', width: 35, fontSize: 11 }}>{evt.minute}</Text>
                         <Text style={{ fontSize: 14, width: 22 }}>{evt.icon}</Text>
                         <Text style={{ color: '#cbd5e1', fontSize: 12, flex: 1 }}>{evt.message}</Text>
                       </View>
                       {appMode === 'coach' && evt.icon === '⚽' && (
                         <TouchableOpacity 
-                          style={{ backgroundColor: '#1e293b', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: '#3b82f6', marginLeft: 8 }}
+                          style={{ backgroundColor: '#0B0E14', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: '#3b82f6', marginLeft: 8 }}
                           onPress={() => startArchiveGoalEdit(m, eIdx)}
                         >
                           <Text style={{ color: '#3b82f6', fontSize: 10, fontWeight: 'bold' }}>Edit Event</Text>
@@ -96,12 +96,12 @@ export default function MatchArchiveModal({
               {archiveEditStep === 'assist' && (
                 <>
                   <Text style={styles.modalTitle}>Step 2: Select Assist Provider</Text>
-                  <Text style={[styles.bulletText, { color: '#f97316', textAlign: 'center', marginBottom: 10 }]}>
+                  <Text style={[styles.bulletText, { color: '#39FF14', textAlign: 'center', marginBottom: 10 }]}>
                     Scorer: {selectedArchiveScorer?.name}
                   </Text>
                   <ScrollView style={{ width: '100%', maxHeight: 300 }}>
                     <TouchableOpacity 
-                      style={[styles.benchBtn, { backgroundColor: '#334155', marginTop: 0 }]} 
+                      style={[styles.benchBtn, { backgroundColor: '#2E3A44', marginTop: 0 }]} 
                       onPress={() => finishArchiveGoalEdit('None')}
                     >
                       <Text style={styles.benchBtnText}>No Assist</Text>
@@ -134,16 +134,16 @@ export default function MatchArchiveModal({
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: '#112240', borderRadius: 10, padding: 15, marginBottom: 15, borderColor: '#233554', borderWidth: 1 },
+  card: { backgroundColor: '#1A1F26', borderRadius: 10, padding: 15, marginBottom: 15, borderColor: '#2E3A44', borderWidth: 1 },
   bulletText: { color: '#cbd5e1', fontSize: 14, marginBottom: 6, lineHeight: 20 },
   resultBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginRight: 12, fontWeight: 'bold', fontSize: 13, color: '#ffffff', overflow: 'hidden' },
   resW: { backgroundColor: '#15803d' },
   resD: { backgroundColor: '#ca8a04' },
-  resL: { backgroundColor: '#7f1d1d' },
-  divider: { height: 1, backgroundColor: '#233554', marginVertical: 10 },
-  modalBox: { backgroundColor: '#112240', width: '88%', padding: 20, borderRadius: 15, borderWidth: 1, borderColor: '#233554', zIndex: 5 },
+  resL: { backgroundColor: '#991B1B' },
+  divider: { height: 1, backgroundColor: '#2E3A44', marginVertical: 10 },
+  modalBox: { backgroundColor: '#1A1F26', width: '88%', padding: 20, borderRadius: 15, borderWidth: 1, borderColor: '#2E3A44', zIndex: 5 },
   modalTitle: { color: '#ffffff', fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
-  liveActionBtnRow: { backgroundColor: '#1e293b', paddingVertical: 15, paddingHorizontal: 15, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: '#334155', width: '100%', alignItems: 'center' },
+  liveActionBtnRow: { backgroundColor: '#0B0E14', paddingVertical: 15, paddingHorizontal: 15, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: '#2E3A44', width: '100%', alignItems: 'center' },
   liveActionTextRow: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
   benchBtn: { backgroundColor: '#ca8a04', padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 10, marginTop: 25, width: '100%' },
   benchBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },

@@ -16,10 +16,10 @@ export default function FormationModal({ visible, onClose, activeFormation, setA
                   {category.formations.map(fmt => (
                     <TouchableOpacity 
                       key={fmt} 
-                      style={[styles.gridBtn, activeFormation === fmt && { backgroundColor: '#f97316' }, { minWidth: '45%' }]}
+                      style={[styles.gridBtn, activeFormation === fmt && { backgroundColor: '#39FF14' }, { minWidth: '45%' }]}
                       onPress={() => { setActiveFormation(fmt); onClose(); }}
                     >
-                      <Text style={styles.gridBtnText}>{fmt}</Text>
+                      <Text style={[styles.gridBtnText, activeFormation === fmt && { color: '#0B0E14' }]}>{fmt}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -37,10 +37,10 @@ export default function FormationModal({ visible, onClose, activeFormation, setA
 
 const styles = StyleSheet.create({
   modalOverlayFull: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
-  modalBoxFull: { backgroundColor: '#112240', width: '92%', padding: 20, borderRadius: 15, borderWidth: 1, borderColor: '#233554', zIndex: 5 },
+  modalBoxFull: { backgroundColor: '#1A1F26', width: '92%', padding: 20, borderRadius: 15, borderWidth: 1, borderColor: '#2E3A44', zIndex: 5 },
   modalTitle: { color: '#ffffff', fontSize: 18, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
-  sectionHeaderModal: { color: '#f97316', fontSize: 13, fontWeight: 'bold', marginTop: 10, marginBottom: 10, textTransform: 'uppercase', alignSelf: 'flex-start', borderBottomWidth: 1, borderBottomColor: '#233554', paddingBottom: 4, width: '100%' },
-  gridBtn: { backgroundColor: '#1e3a8a', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6, minWidth: '22%', alignItems: 'center' },
+  sectionHeaderModal: { color: '#39FF14', fontSize: 13, fontWeight: 'bold', marginTop: 10, marginBottom: 10, textTransform: 'uppercase', alignSelf: 'flex-start', borderBottomWidth: 1, borderBottomColor: '#2E3A44', paddingBottom: 4, width: '100%' },
+  gridBtn: { backgroundColor: '#0B0E14', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6, minWidth: '22%', alignItems: 'center', borderWidth: 1, borderColor: '#2E3A44' },
   gridBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 11 },
   cancelBtn: { padding: 10, alignItems: 'center', width: '100%' },
   cancelBtnText: { color: '#94a3b8', fontSize: 14 }

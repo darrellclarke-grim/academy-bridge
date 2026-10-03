@@ -39,7 +39,7 @@ export default function LiveMatchScreen({
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: '#0B0E14' }}>
       
       <View style={styles.liveHeader}>
         <View>
@@ -58,10 +58,10 @@ export default function LiveMatchScreen({
 
       {pendingOfflineCount > 0 && (
         <View style={{ backgroundColor: '#eab308', padding: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15 }}>
-          <Text style={{ color: '#0f172a', fontWeight: 'bold', fontSize: 12 }}>
+          <Text style={{ color: '#0B0E14', fontWeight: 'bold', fontSize: 12 }}>
             📡 {pendingOfflineCount} Event{pendingOfflineCount > 1 ? 's' : ''} Saved Offline
           </Text>
-          <TouchableOpacity onPress={handleManualSync} style={{ backgroundColor: '#0f172a', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
+          <TouchableOpacity onPress={handleManualSync} style={{ backgroundColor: '#0B0E14', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
             <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 11 }}>Sync Now 🔄</Text>
           </TouchableOpacity>
         </View>
@@ -73,10 +73,10 @@ export default function LiveMatchScreen({
             <TextInput 
               style={[
                 styles.opponentInput,
-                !opponentName.trim() && { borderColor: '#f97316', borderWidth: 2, backgroundColor: 'rgba(249,115,22,0.15)' }
+                !opponentName.trim() && { borderColor: '#39FF14', borderWidth: 2, backgroundColor: 'rgba(57,255,20,0.15)' }
               ]} 
               placeholder="Enter Opponent Name (Required)..." 
-              placeholderTextColor={!opponentName.trim() ? '#f97316' : '#64748b'}
+              placeholderTextColor={!opponentName.trim() ? '#39FF14' : '#64748b'}
               value={opponentName}
               onChangeText={setOpponentName}
             />
@@ -113,7 +113,7 @@ export default function LiveMatchScreen({
 
       {appMode === 'coach' && (
         <View style={styles.liveActionHeader}>
-          <TouchableOpacity style={[styles.topActionBtn, { borderColor: '#f97316' }]} onPress={initGoalFlow}>
+          <TouchableOpacity style={[styles.topActionBtn, { borderColor: '#39FF14' }]} onPress={initGoalFlow}>
             <Text style={styles.topActionText}>⚽ Log Goal</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.topActionBtn, { borderColor: '#eab308' }]} onPress={initCardFlow}>
@@ -166,7 +166,7 @@ export default function LiveMatchScreen({
             {(subs || []).map(p => {
               if (!p) return null;
               return (
-                <TouchableOpacity key={p.id} style={[styles.livePlayerCard, { borderColor: '#475569', backgroundColor: '#1e293b' }]} onPress={() => setActiveLivePlayer(p)}>
+                <TouchableOpacity key={p.id} style={[styles.livePlayerCard, { borderColor: '#2E3A44', backgroundColor: '#0B0E14' }]} onPress={() => setActiveLivePlayer(p)}>
                   <Text style={[styles.livePlayerPos, { color: '#94a3b8' }]}>{p.matchday_position || 'N/A'}</Text>
                   <Text style={[styles.livePlayerName, { color: '#cbd5e1' }]} numberOfLines={1}>#{p.squad_number} {p.name}</Text>
                 </TouchableOpacity>
@@ -180,35 +180,35 @@ export default function LiveMatchScreen({
 }
 
 const styles = StyleSheet.create({
-  liveHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#112240', padding: 20, borderBottomWidth: 1, borderBottomColor: '#233554' },
-  liveHeaderSub: { color: '#f97316', fontWeight: 'bold', fontSize: 12, textTransform: 'uppercase' },
+  liveHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1A1F26', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2E3A44' },
+  liveHeaderSub: { color: '#39FF14', fontWeight: 'bold', fontSize: 12, textTransform: 'uppercase' },
   clockText: { color: '#ffffff', fontSize: 32, fontWeight: 'bold', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
-  phaseBtn: { backgroundColor: '#1e3a8a', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 8 },
-  phaseBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
-  scoreboardContainer: { backgroundColor: '#0f172a', borderBottomWidth: 1, borderBottomColor: '#233554', padding: 15 },
-  opponentInput: { backgroundColor: '#1e293b', color: '#ffffff', padding: 10, borderRadius: 8, textAlign: 'center', marginBottom: 8, borderWidth: 1, borderColor: '#334155' },
+  phaseBtn: { backgroundColor: '#39FF14', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 8 },
+  phaseBtnText: { color: '#0B0E14', fontWeight: 'bold', fontSize: 14 },
+  scoreboardContainer: { backgroundColor: '#0B0E14', borderBottomWidth: 1, borderBottomColor: '#2E3A44', padding: 15 },
+  opponentInput: { backgroundColor: '#1A1F26', color: '#ffffff', padding: 10, borderRadius: 8, textAlign: 'center', marginBottom: 8, borderWidth: 1, borderColor: '#2E3A44' },
   scoreboard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   scoreCol: { flex: 1, alignItems: 'center' },
   scoreColCenter: { width: 50, alignItems: 'center' },
   scoreTeam: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 5 },
   scoreNum: { color: '#ffffff', fontSize: 40, fontWeight: 'bold' },
-  scoreVs: { color: '#f97316', fontSize: 16, fontWeight: 'bold' },
-  fmtBtn: { backgroundColor: '#1e293b', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#334155', minWidth: 50, alignItems: 'center' },
-  fmtBtnActive: { backgroundColor: '#f97316', borderColor: '#f97316' },
+  scoreVs: { color: '#39FF14', fontSize: 16, fontWeight: 'bold' },
+  fmtBtn: { backgroundColor: '#1A1F26', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#2E3A44', minWidth: 50, alignItems: 'center' },
+  fmtBtnActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
   fmtBtnText: { color: '#94a3b8', fontSize: 11, fontWeight: 'bold' },
-  fmtBtnTextActive: { color: '#ffffff' },
-  liveActionHeader: { flexDirection: 'row', justifyContent: 'center', gap: 6, padding: 12, borderBottomWidth: 1, borderBottomColor: '#233554' },
-  topActionBtn: { backgroundColor: '#1e293b', paddingVertical: 12, paddingHorizontal: 8, borderRadius: 8, borderWidth: 2, alignItems: 'center', flex: 1 },
+  fmtBtnTextActive: { color: '#0B0E14' },
+  liveActionHeader: { flexDirection: 'row', justifyContent: 'center', gap: 6, padding: 12, borderBottomWidth: 1, borderBottomColor: '#2E3A44', backgroundColor: '#0B0E14' },
+  topActionBtn: { backgroundColor: '#1A1F26', paddingVertical: 12, paddingHorizontal: 8, borderRadius: 8, borderWidth: 2, alignItems: 'center', flex: 1 },
   topActionText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
-  tickerContainer: { backgroundColor: '#0f172a', borderBottomWidth: 1, borderBottomColor: '#233554', maxHeight: 150 },
-  tickerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  tickerMin: { color: '#f97316', fontWeight: 'bold', width: 35, fontSize: 12 },
+  tickerContainer: { backgroundColor: '#0B0E14', borderBottomWidth: 1, borderBottomColor: '#2E3A44', maxHeight: 150 },
+  tickerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: '#2E3A44' },
+  tickerMin: { color: '#39FF14', fontWeight: 'bold', width: 35, fontSize: 12 },
   tickerIcon: { fontSize: 16, width: 25 },
   tickerMessage: { color: '#cbd5e1', fontSize: 13, flex: 1 },
   bulletText: { color: '#cbd5e1', fontSize: 14, marginBottom: 6, lineHeight: 20 },
   content: { padding: 15 },
-  sectionHeaderModal: { color: '#f97316', fontSize: 13, fontWeight: 'bold', marginTop: 10, marginBottom: 10, textTransform: 'uppercase', alignSelf: 'flex-start', borderBottomWidth: 1, borderBottomColor: '#233554', paddingBottom: 4, width: '100%' },
-  livePlayerCard: { backgroundColor: '#1e3a8a', padding: 15, borderRadius: 10, minWidth: '45%', alignItems: 'center', flex: 1, borderWidth: 1, borderColor: '#3b82f6' },
-  livePlayerPos: { color: '#f97316', fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
+  sectionHeaderModal: { color: '#39FF14', fontSize: 13, fontWeight: 'bold', marginTop: 10, marginBottom: 10, textTransform: 'uppercase', alignSelf: 'flex-start', borderBottomWidth: 1, borderBottomColor: '#2E3A44', paddingBottom: 4, width: '100%' },
+  livePlayerCard: { backgroundColor: '#1A1F26', padding: 15, borderRadius: 10, minWidth: '45%', alignItems: 'center', flex: 1, borderWidth: 1, borderColor: '#39FF14' },
+  livePlayerPos: { color: '#39FF14', fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
   livePlayerName: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' }
 });

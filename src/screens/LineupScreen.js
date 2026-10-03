@@ -34,6 +34,9 @@ export default function LineupScreen({
     return String(val).endsWith('%') ? val : `${val}%`;
   };
 
+  // Force pitch mode for non-coaches
+  const activeMode = appMode === 'coach' ? lineupViewMode : 'pitch';
+
   return (
     <View style={styles.container}>
       {/* HEADER */}
@@ -42,26 +45,28 @@ export default function LineupScreen({
         <Text style={styles.headerTitle}>Match Day Lineup</Text>
       </View>
 
-      {/* VIEW MODE TOGGLES */}
-      <View style={styles.toggleBar}>
-        <TouchableOpacity
-          style={[styles.toggleBtn, lineupViewMode === 'pitch' && styles.toggleBtnActive]}
-          onPress={() => setLineupViewMode && setLineupViewMode('pitch')}
-        >
-          <Text style={[styles.toggleBtnText, lineupViewMode === 'pitch' && styles.toggleBtnTextActive]}>
-            ⚽ Pitch Lineup
-          </Text>
-        </TouchableOpacity>
+      {/* VIEW MODE TOGGLES (COACH ONLY) */}
+      {appMode === 'coach' && (
+        <View style={styles.toggleBar}>
+          <TouchableOpacity
+            style={[styles.toggleBtn, activeMode === 'pitch' && styles.toggleBtnActive]}
+            onPress={() => setLineupViewMode && setLineupViewMode('pitch')}
+          >
+            <Text style={[styles.toggleBtnText, activeMode === 'pitch' && styles.toggleBtnTextActive]}>
+              ⚽ Pitch Lineup
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.toggleBtn, lineupViewMode === 'depth' && styles.toggleBtnActive]}
-          onPress={() => setLineupViewMode && setLineupViewMode('depth')}
-        >
-          <Text style={[styles.toggleBtnText, lineupViewMode === 'depth' && styles.toggleBtnTextActive]}>
-            📊 Squad Depth
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            style={[styles.toggleBtn, activeMode === 'depth' && styles.toggleBtnActive]}
+            onPress={() => setLineupViewMode && setLineupViewMode('depth')}
+          >
+            <Text style={[styles.toggleBtnText, activeMode === 'depth' && styles.toggleBtnTextActive]}>
+              📊 Squad Depth
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* COACH-ONLY ACTION CONTROLS */}
       {appMode === 'coach' && (
@@ -84,7 +89,7 @@ export default function LineupScreen({
       )}
 
       <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
-        {lineupViewMode === 'pitch' ? (
+        {activeMode === 'pitch' ? (
           <>
             <Text style={styles.instructionText}>
               {appMode === 'coach'
@@ -129,7 +134,7 @@ export default function LineupScreen({
           </>
         ) : (
           <>
-            {/* SQUAD DEPTH VIEW */}
+            {/* SQUAD DEPTH VIEW (COACH ONLY) */}
             <View style={styles.filterRow}>
               <TouchableOpacity
                 style={[styles.filterBtn, squadDepthFilter === 'primary' && styles.filterBtnActive]}

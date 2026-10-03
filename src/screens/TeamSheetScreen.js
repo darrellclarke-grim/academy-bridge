@@ -1,5 +1,4 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function TeamSheetScreen({
   profile,
@@ -9,7 +8,7 @@ export default function TeamSheetScreen({
   adjustMatchStat
 }) {
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: '#0B0E14' }}>
       <View style={styles.headerRow}>
         <View>
           <Text style={styles.headerSub}>Season Performance</Text>
@@ -28,8 +27,8 @@ export default function TeamSheetScreen({
                 <Text style={[styles.thText, { width: 50 }]}>POS</Text>
                 <Text style={[styles.thText, { width: 75, textAlign: 'center' }]}>TRN</Text>
                 <Text style={[styles.thText, { width: 75, textAlign: 'center' }]}>APPS</Text>
-                {(profile?.role === 'coach' && appMode === 'coach') ? <Text style={[styles.thText, { width: 60, textAlign: 'center', color: '#f97316' }]}>MINS</Text> : null}
-                {(profile?.role === 'coach' && appMode === 'coach') ? <Text style={[styles.thText, { width: 50, textAlign: 'center', color: '#f97316' }]}>AVG</Text> : null}
+                {(profile?.role === 'coach' && appMode === 'coach') ? <Text style={[styles.thText, { width: 60, textAlign: 'center', color: '#39FF14' }]}>MINS</Text> : null}
+                {(profile?.role === 'coach' && appMode === 'coach') ? <Text style={[styles.thText, { width: 50, textAlign: 'center', color: '#39FF14' }]}>AVG</Text> : null}
                 <Text style={[styles.thText, { width: 75, textAlign: 'center' }]}>SAVES</Text>
                 <Text style={[styles.thText, { width: 75, textAlign: 'center' }]}>CS</Text>
                 <Text style={[styles.thText, { width: 75, textAlign: 'center' }]}>POTM</Text>
@@ -55,10 +54,10 @@ export default function TeamSheetScreen({
                     </View>
 
                     {(profile?.role === 'coach' && appMode === 'coach') ? (
-                      <Text style={[styles.stepValText, { width: 60, color: '#f97316' }]}>{p.total_minutes_played || 0}</Text>
+                      <Text style={[styles.stepValText, { width: 60, color: '#39FF14' }]}>{p.total_minutes_played || 0}</Text>
                     ) : null}
                     {(profile?.role === 'coach' && appMode === 'coach') ? (
-                      <Text style={[styles.stepValText, { width: 50, color: '#f97316' }]}>{p.apps > 0 ? Math.round((p.total_minutes_played || 0) / p.apps) : 0}</Text>
+                      <Text style={[styles.stepValText, { width: 50, color: '#39FF14' }]}>{p.apps > 0 ? Math.round((p.total_minutes_played || 0) / p.apps) : 0}</Text>
                     ) : null}
 
                     <View style={styles.stepperCellSmall}>
@@ -93,8 +92,8 @@ export default function TeamSheetScreen({
                 <Text style={[styles.thText, { width: 50 }]}>POS</Text>
                 <Text style={[styles.thText, { width: 75, textAlign: 'center' }]}>TRN</Text>
                 <Text style={[styles.thText, { width: 75, textAlign: 'center' }]}>APPS</Text>
-                {(profile?.role === 'coach' && appMode === 'coach') ? <Text style={[styles.thText, { width: 60, textAlign: 'center', color: '#f97316' }]}>MINS</Text> : null}
-                {(profile?.role === 'coach' && appMode === 'coach') ? <Text style={[styles.thText, { width: 50, textAlign: 'center', color: '#f97316' }]}>AVG</Text> : null}
+                {(profile?.role === 'coach' && appMode === 'coach') ? <Text style={[styles.thText, { width: 60, textAlign: 'center', color: '#39FF14' }]}>MINS</Text> : null}
+                {(profile?.role === 'coach' && appMode === 'coach') ? <Text style={[styles.thText, { width: 50, textAlign: 'center', color: '#39FF14' }]}>AVG</Text> : null}
                 <Text style={[styles.thText, { width: 75, textAlign: 'center' }]}>GOALS</Text>
                 <Text style={[styles.thText, { width: 75, textAlign: 'center' }]}>ASSISTS</Text>
                 <Text style={[styles.thText, { width: 75, textAlign: 'center' }]}>POTM</Text>
@@ -120,10 +119,10 @@ export default function TeamSheetScreen({
                     </View>
 
                     {(profile?.role === 'coach' && appMode === 'coach') ? (
-                      <Text style={[styles.stepValText, { width: 60, color: '#f97316' }]}>{p.total_minutes_played || 0}</Text>
+                      <Text style={[styles.stepValText, { width: 60, color: '#39FF14' }]}>{p.total_minutes_played || 0}</Text>
                     ) : null}
                     {(profile?.role === 'coach' && appMode === 'coach') ? (
-                      <Text style={[styles.stepValText, { width: 50, color: '#f97316' }]}>{p.apps > 0 ? Math.round((p.total_minutes_played || 0) / p.apps) : 0}</Text>
+                      <Text style={[styles.stepValText, { width: 50, color: '#39FF14' }]}>{p.apps > 0 ? Math.round((p.total_minutes_played || 0) / p.apps) : 0}</Text>
                     ) : null}
 
                     <View style={styles.stepperCellSmall}>
@@ -158,19 +157,19 @@ export default function TeamSheetScreen({
 }
 
 const styles = StyleSheet.create({
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#112240', padding: 20, borderBottomWidth: 1, borderBottomColor: '#233554' },
-  headerSub: { color: '#f97316', fontWeight: 'bold', fontSize: 12, textTransform: 'uppercase' },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1A1F26', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2E3A44' },
+  headerSub: { color: '#39FF14', fontWeight: 'bold', fontSize: 12, textTransform: 'uppercase' },
   headerTitle: { color: '#ffffff', fontSize: 22, fontWeight: 'bold' },
   content: { padding: 15 },
-  sectionHeader: { color: '#f97316', fontSize: 16, fontWeight: 'bold', marginBottom: 10, textTransform: 'uppercase' },
-  tableContainer: { backgroundColor: '#112240', borderRadius: 8, borderWidth: 1, borderColor: '#233554', overflow: 'hidden' },
-  tableHeaderRow: { flexDirection: 'row', backgroundColor: '#0f172a', paddingVertical: 12, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#233554', alignItems: 'center' },
+  sectionHeader: { color: '#39FF14', fontSize: 16, fontWeight: 'bold', marginBottom: 10, textTransform: 'uppercase' },
+  tableContainer: { backgroundColor: '#1A1F26', borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44', overflow: 'hidden' },
+  tableHeaderRow: { flexDirection: 'row', backgroundColor: '#0B0E14', paddingVertical: 12, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#2E3A44', alignItems: 'center' },
   thText: { color: '#94a3b8', fontWeight: 'bold', fontSize: 11, textTransform: 'uppercase' },
-  tableBodyRow: { flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#1e293b', alignItems: 'center' },
+  tableBodyRow: { flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: '#0B0E14', alignItems: 'center' },
   tdTextName: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
   tdTextPos: { color: '#94a3b8', fontWeight: 'bold', fontSize: 12 },
   stepperCellSmall: { width: 75, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  stepBtn: { backgroundColor: '#1e293b', width: 24, height: 24, borderRadius: 4, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
+  stepBtn: { backgroundColor: '#0B0E14', width: 24, height: 24, borderRadius: 4, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#39FF14' },
   stepBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
   stepValText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13, minWidth: 16, textAlign: 'center' }
 });
