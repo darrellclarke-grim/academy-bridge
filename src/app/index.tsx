@@ -73,6 +73,7 @@ export default function App() {
   const [activeTeamId, setActiveTeamId] = useState(null);
   const [teamName, setTeamName] = useState('');
   const [teamAgeGroup, setTeamAgeGroup] = useState('U16'); 
+  const [teamLogoUrl, setTeamLogoUrl] = useState('');
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamAgeGroup, setNewTeamAgeGroup] = useState('U16');
@@ -454,13 +455,14 @@ export default function App() {
     if (activeTeamId) {
       supabase
         .from('teams')
-        .select('fa_league_table_url, age_group')
+        .select('fa_league_table_url, age_group, logo_url')
         .eq('id', activeTeamId)
         .single()
         .then(({ data, error }) => {
           if (data) {
             setFaLeagueUrl(data.fa_league_table_url || '');
             if (data.age_group) setTeamAgeGroup(data.age_group);
+            if (data.logo_url) setTeamLogoUrl(data.logo_url || '');
           }
         });
 
@@ -521,6 +523,7 @@ export default function App() {
     
     if (resolvedTeamId) fetchTeamData(userId, resolvedTeamId);
   }
+
   const handleModeSwitch = (mode) => {
     setAppMode(mode);
     setCurrentTab(mode === 'coach' ? 'coachHub' : 'player');
@@ -1454,6 +1457,32 @@ export default function App() {
     Alert.alert("Saved!", "FA League Table URL is now permanently saved for this team.");
   }
 
+  async function saveTeamLogoUrl() {
+    Keyboard.dismiss();
+    if (!activeTeamId) {
+      Alert.alert("Error", "No active team selected.");
+      return;
+    }
+
+    const cleanUrl = teamLogoUrl.trim();
+
+    const { data, error } = await supabase
+      .from('teams')
+      .update({ logo_url: cleanUrl })
+      .eq('id', activeTeamId)
+      .select();
+
+    if (error) {
+      console.error("❌ Logo URL Save Error:", error);
+      Alert.alert("Database Error", error.message);
+      return;
+    }
+
+    setTeamLogoUrl(cleanUrl);
+    setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, logo_url: cleanUrl } : t));
+    Alert.alert("Saved!", "Team logo URL updated and saved permanently.");
+  }
+
   async function fetchTeamData(userId, teamId) {
     if (!teamId) return;
     const { data: allPlayers } = await supabase.from('players').select('*').eq('team_id', teamId).order('name', { ascending: true });
@@ -1545,7 +1574,7 @@ export default function App() {
     generateSeasonPdfReport({
       teamName: currentTeam?.name || activeTeamObj?.name || 'Tactical Engine Squad',
       ageGroup: currentTeam?.age_group || teamAgeGroup || 'Youth',
-      clubLogoUrl: currentTeam?.logo_url || null,
+      clubLogoUrl: currentTeam?.logo_url || teamLogoUrl || null,
       teamSheet,
       matchHistory,
       scoutNotes: scoutNotesInput,
@@ -2660,6 +2689,19 @@ export default function App() {
                   </TouchableOpacity>
 
                   <View style={{ marginVertical: 12, height: 1, backgroundColor: '#2E3A44' }} />
+
+                  <Text style={styles.inputLabel}>Team Badge / Logo Image URL:</Text>
+                  <TextInput 
+                    style={styles.input} 
+                    placeholder="Paste Image URL (PNG/JPG)..." 
+                    placeholderTextColor="#64748b" 
+                    value={teamLogoUrl} 
+                    onChangeText={setTeamLogoUrl} 
+                    autoCapitalize="none"
+                  />
+                  <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#39FF14', marginBottom: 15 }]} onPress={saveTeamLogoUrl}>
+                    <Text style={[styles.primaryAuthBtnText, { color: '#0B0E14' }]}>Save Team Logo</Text>
+                  </TouchableOpacity>
 
                   <Text style={styles.inputLabel}>FA League Table Web Link:</Text>
                   <TextInput 
