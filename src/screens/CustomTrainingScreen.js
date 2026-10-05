@@ -10,7 +10,7 @@ export default function CustomTrainingScreen({
   openDrillVideo
 }) {
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: '#0B0E14' }}>
       <View style={styles.header}>
         <Text style={styles.headerSub}>Development Focus</Text>
         <Text style={styles.headerTitle}>Custom Training</Text>
@@ -73,14 +73,14 @@ export default function CustomTrainingScreen({
 }
 
 const styles = StyleSheet.create({
-  header: { backgroundColor: '#112240', padding: 20, borderBottomWidth: 1, borderBottomColor: '#233554' },
-  headerSub: { color: '#f97316', fontWeight: 'bold', fontSize: 12, textTransform: 'uppercase' },
+  header: { backgroundColor: '#1A1F26', padding: 20, borderBottomWidth: 1, borderBottomColor: '#2E3A44' },
+  headerSub: { color: '#39FF14', fontWeight: 'bold', fontSize: 12, textTransform: 'uppercase' },
   headerTitle: { color: '#ffffff', fontSize: 22, fontWeight: 'bold' },
   content: { padding: 15 },
-  card: { backgroundColor: '#112240', borderRadius: 10, padding: 15, marginBottom: 15, borderColor: '#233554', borderWidth: 1 },
-  cardTitle: { color: '#f97316', fontWeight: 'bold', fontSize: 16, marginBottom: 10 },
-  divider: { height: 1, backgroundColor: '#233554', marginVertical: 10 },
+  card: { backgroundColor: '#1A1F26', borderRadius: 10, padding: 15, marginBottom: 15, borderColor: '#2E3A44', borderWidth: 1 },
+  cardTitle: { color: '#39FF14', fontWeight: 'bold', fontSize: 16, marginBottom: 10 },
+  divider: { height: 1, backgroundColor: '#2E3A44', marginVertical: 10 },
   inputLabel: { color: '#94a3b8', fontWeight: 'bold', marginBottom: 6, fontSize: 12 },
-  dropdownBtn: { backgroundColor: '#1e293b', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#334155', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  dropdownBtn: { backgroundColor: '#0B0E14', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   dropdownBtnText: { color: '#cbd5e1', fontWeight: 'bold', fontSize: 13 }
 });
