@@ -23,6 +23,7 @@ import { supabase } from '../supabase';
 // Constants & Utilities
 import { ageGroupOptions, profilePositions, profileSecondaryPositions } from '../constants/profileData';
 import { formationCategories, formationLayouts, gameStateTactics } from '../constants/tactics';
+import { seedFullTeamRoster, seedSeasonStats } from '../utils/devSeeder';
 import { enqueueOfflineEvent, flushOfflineQueue, getOfflineQueue } from '../utils/offlineQueue';
 import { generateSeasonPdfReport } from '../utils/pdfGenerator';
 import {
@@ -220,6 +221,11 @@ export default function App() {
 
   const [isRsvpListExpanded, setIsRsvpListExpanded] = useState(false);
 
+  // DYNAMIC TEAM & AGE GROUP RESOLUTION
+  const activeTeamObj = myTeams.find(t => t.id === activeTeamId) || {};
+  const effectiveAgeGroup = activeTeamObj?.age_group || teamAgeGroup || 'U16';
+  const isAdultTeam = String(effectiveAgeGroup).toLowerCase().includes('adult');
+
   const activeLayout = formationLayouts[activeFormation] || formationLayouts['4-2-3-1'];
   const currentAvailablePositions = activeLayout.map(node => node.code);
 
@@ -242,7 +248,7 @@ export default function App() {
   const currentQuizList = rawQuizList.filter(q => {
     if (!q.tier) return true;
     const tierStr = q.tier.toLowerCase();
-    const ageLower = teamAgeGroup.toLowerCase();
+    const ageLower = effectiveAgeGroup.toLowerCase();
 
     if (['u13', 'u14', 'u15'].includes(ageLower)) return tierStr.includes('academy');
     if (['u16', 'u17', 'u18'].includes(ageLower)) return tierStr.includes('reserve');
@@ -255,7 +261,6 @@ export default function App() {
   const outfieldPlayers = (teamSheet || []).filter(p => p && getPosCategory(p.position) !== 'GK');
 
   const activeWeekData = seasonCurriculum[selectedWeek] || {};
-  const activeTeamObj = myTeams.find(t => t.id === activeTeamId) || {};
 
   const totalTeamApps = (teamSheet || []).reduce((sum, p) => sum + (p.apps || 0), 0);
   const isTafeDisabled = totalTeamApps === 0;
@@ -475,6 +480,7 @@ export default function App() {
       if (!resolvedTeamId || !teamsData.find(t => t.id === resolvedTeamId)) {
         resolvedTeamId = teamsData[0].id;
         setActiveTeamId(resolvedTeamId);
+        if (teamsData[0].age_group) setTeamAgeGroup(teamsData[0].age_group);
       }
     } else {
       setMyTeams([]);
@@ -489,7 +495,6 @@ export default function App() {
       await fetchTeamData(userId, resolvedTeamId);
     }
     
-    // Hold startup screen for a minimum of 3.5 seconds
     const elapsedTime = Date.now() - startTime;
     const remainingDelay = Math.max(0, 3500 - elapsedTime);
 
@@ -528,7 +533,6 @@ export default function App() {
     }
   }
 
-  // REACT HOOKS (ALL UNCONDITIONAL TOP-LEVEL DECLARATIONS)
   useEffect(() => {
     fetchCloudData();
     const startTime = Date.now();
@@ -585,10 +589,10 @@ export default function App() {
   }, [profile, appMode]);
 
   useEffect(() => {
-    if (appMode === 'parent' && teamAgeGroup === 'Adult' && playerTab !== 'overview') {
+    if (appMode === 'parent' && isAdultTeam && playerTab !== 'overview') {
       setPlayerTab('overview');
     }
-  }, [appMode, teamAgeGroup, playerTab]);
+  }, [appMode, effectiveAgeGroup, playerTab]);
 
   useEffect(() => {
     if (activeTeamId) {
@@ -625,7 +629,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [matchPhase, matchStartTimestamp, accumulatedSeconds]);
 
-  // BRANDED STARTUP LOADING SCREEN (PROPERLY SCALED LOGO & TEXT)
   if (loading) {
     return (
       <SafeAreaView style={styles.splashContainer}>
@@ -644,7 +647,6 @@ export default function App() {
     );
   }
 
-  // AUTH SCREEN
   if (!session) {
     return (
       <TouchableOpacity activeOpacity={1} onPress={() => Keyboard.dismiss()} style={{ flex: 1 }}>
@@ -674,7 +676,6 @@ export default function App() {
     );
   }
 
-  // ONBOARDING WIZARD
   if (!profile || profile.role_configured === false) {
     return (
       <TouchableOpacity activeOpacity={1} onPress={() => Keyboard.dismiss()} style={{ flex: 1 }}>
@@ -972,7 +973,7 @@ export default function App() {
       const topAssister = sortedByAssists[0]?.assists > 0 ? `${sortedByAssists[0].name} (${sortedByAssists[0].assists} Assists)` : 'N/A';
       const topPotm = sortedByPotm[0] ? `${sortedByPotm[0].name} (${(sortedByPotm[0].motm || 0) + (sortedByPotm[0].parent_motm || 0)} Total Awards)` : 'N/A';
 
-      let reportText = `🏆 EXECUTIVE SEASON REPORT (${seasonLabel})\nTeam: ${activeTeamObj?.name || 'Squad'} (${teamAgeGroup})\nGenerated: ${new Date().toLocaleDateString()}\n\n`;
+      let reportText = `🏆 EXECUTIVE SEASON REPORT (${seasonLabel})\nTeam: ${activeTeamObj?.name || 'Squad'} (${effectiveAgeGroup})\nGenerated: ${new Date().toLocaleDateString()}\n\n`;
       reportText += `📊 TEAM RECORD:\n• Matches Played: ${totalMatches}\n• Record: ${wins}W - ${draws}D - ${losses}L (${winRate}% Win Rate)\n• Goals: ${goalsFor} Scored / ${goalsAgainst} Conceded (GD: ${goalsFor - goalsAgainst})\n\n`;
       reportText += `⭐ INDIVIDUAL SEASON HONOURS:\n• Golden Boot: ${topScorer}\n• Playmaker Award: ${topAssister}\n• Overall POTM Leader: ${topPotm}\n\n`;
       reportText += `👥 SQUAD MASTER STATS BREAKDOWN:\n`;
@@ -1030,7 +1031,7 @@ export default function App() {
       try {
         await generateSeasonPdfReport({
           teamName: activeTeamObj?.name || 'Tactical Engine Squad',
-          ageGroup: teamAgeGroup || 'Youth',
+          ageGroup: effectiveAgeGroup || 'Youth',
           clubLogoUrl: activeTeamObj?.logo_url || teamLogoUrl || null,
           teamSheet,
           matchHistory,
@@ -1551,6 +1552,7 @@ export default function App() {
       
       if (remainingTeams.length > 0) {
         setActiveTeamId(remainingTeams[0].id);
+        if (remainingTeams[0].age_group) setTeamAgeGroup(remainingTeams[0].age_group);
       } else {
         setActiveTeamId(null);
         await supabase.from('profiles').update({ role_configured: false }).eq('id', session.user.id);
@@ -1725,7 +1727,7 @@ export default function App() {
     const currentTeam = myTeams.find(t => t.id === activeTeamId);
     generateSeasonPdfReport({
       teamName: currentTeam?.name || activeTeamObj?.name || 'Tactical Engine Squad',
-      ageGroup: currentTeam?.age_group || teamAgeGroup || 'Youth',
+      ageGroup: currentTeam?.age_group || effectiveAgeGroup || 'Youth',
       clubLogoUrl: currentTeam?.logo_url || teamLogoUrl || null,
       teamSheet,
       matchHistory,
@@ -1858,11 +1860,10 @@ export default function App() {
     );
   };
 
-  // MAIN APP LAYOUT
   return (
     <SafeAreaView style={styles.container}>
       
-      {/* TOP HEADER BAR */}
+      {/* TOP HEADER BAR (CASE-INSENSITIVE DYNAMIC FAN/PARENT TOGGLE) */}
       <View style={styles.masterToggleBar}>
         <TouchableOpacity style={styles.menuTriggerBtn} onPress={() => setIsSidebarOpen(true)}>
           <Text style={styles.menuTriggerIcon}>☰</Text>
@@ -1878,7 +1879,7 @@ export default function App() {
           )}
           <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'parent' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('parent')}>
             <Text style={[styles.masterToggleBtnText, appMode === 'parent' && styles.masterToggleBtnTextActive]}>
-              {teamAgeGroup === 'Adult' ? 'FAN' : 'PARENT'}
+              {isAdultTeam ? 'FAN' : 'PARENT'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'player' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('player')}>
@@ -1888,7 +1889,7 @@ export default function App() {
         <TouchableOpacity style={styles.signOutBtn} onPress={() => supabase.auth.signOut()}><Text style={styles.signOutBtnText}>Log Out</Text></TouchableOpacity>
       </View>
 
-      {/* MULTI-TEAM HORIZONTAL SELECTOR BAR */}
+      {/* MULTI-TEAM HORIZONTAL SELECTOR BAR WITH INSTANT AGE-GROUP STATE UPDATE */}
       {appMode === 'coach' && myTeams.length > 0 && (
         <View style={styles.teamSelectorBar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -1896,7 +1897,10 @@ export default function App() {
               <TouchableOpacity 
                 key={t.id} 
                 style={[styles.teamTab, activeTeamId === t.id && styles.teamTabActive]}
-                onPress={() => setActiveTeamId(t.id)}
+                onPress={() => {
+                  setActiveTeamId(t.id);
+                  if (t.age_group) setTeamAgeGroup(t.age_group);
+                }}
               >
                 <Text style={[styles.teamTabText, activeTeamId === t.id && styles.teamTabTextActive]}>{t.name} ({t.age_group || 'U16'})</Text>
               </TouchableOpacity>
@@ -1908,7 +1912,7 @@ export default function App() {
       {/* SCREEN ROUTER VIEWER */}
       <View style={styles.screenViewer}>
 
-        {/* PLAYER & PARENT PROFILE VIEW */}
+        {/* PLAYER & PARENT / FAN PROFILE VIEW */}
         {(currentTab === 'player' || currentTab === 'profiles') && appMode !== 'coach' && (
           <PlayerProfileScreen
             myLinkedPlayers={myLinkedPlayers}
@@ -1917,7 +1921,7 @@ export default function App() {
             setActivePlayerId={setActivePlayerId}
             activeFormation={activeFormation}
             appMode={appMode}
-            teamAgeGroup={teamAgeGroup}
+            teamAgeGroup={effectiveAgeGroup}
             playerTab={playerTab}
             setPlayerTab={setPlayerTab}
             matchHistory={matchHistory}
@@ -1952,6 +1956,8 @@ export default function App() {
             handleRestartQuiz={handleRestartQuiz}
             renderProfileStatBar={renderProfileStatBar}
             toggleRSVP={toggleRSVP}
+            setIsFaWebviewOpen={setIsFaWebviewOpen}
+            faLeagueUrl={faLeagueUrl}
           />
         )}
 
@@ -2093,7 +2099,9 @@ export default function App() {
           <>
             <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('player')}>
               <Text style={[styles.navIcon, currentTab === 'player' && styles.activeNav]}>⚽</Text>
-              <Text style={[styles.navText, currentTab === 'player' && styles.activeNav]}>My Profile</Text>
+              <Text style={[styles.navText, currentTab === 'player' && styles.activeNav]}>
+                {(appMode === 'parent' && isAdultTeam) ? 'Match Hub' : 'My Profile'}
+              </Text>
             </TouchableOpacity>
             
             <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('lineup')}>
@@ -2139,8 +2147,6 @@ export default function App() {
       </View>
 
       {/* MODALS & OVERLAYS */}
-
-      {/* NEW PAST SEASON ARCHIVE MODAL */}
       <Modal visible={isSeasonArchiveOpen} transparent={true} animationType="slide">
         <View style={styles.modalOverlayFull}>
           <SafeAreaView style={{ flex: 1, width: '100%' }}>
@@ -2253,7 +2259,7 @@ export default function App() {
         appMode={appMode}
         activeTeamObj={activeTeamObj}
         teamSheet={teamSheet}
-        teamAgeGroup={teamAgeGroup}
+        teamAgeGroup={effectiveAgeGroup}
         activePlayer={activePlayer}
         shareStaffInvite={shareStaffInvite}
         shareFanInvite={shareFanInvite}
@@ -2756,6 +2762,47 @@ export default function App() {
             <ScrollView style={{ flex: 1, marginTop: 10 }} keyboardShouldPersistTaps="handled">
               {appMode === 'coach' && (
                 <>
+                  {/* DEV SEEDING TOOLS */}
+                  {__DEV__ && (
+                    <>
+                      <TouchableOpacity 
+                        style={[styles.sidebarItem, { borderColor: '#3b82f6' }]} 
+                        onPress={() => {
+                          setIsSidebarOpen(false);
+                          seedFullTeamRoster({
+                            activeTeamId,
+                            activeTeamName: activeTeamObj?.name,
+                            fetchTeamData,
+                            userId: session?.user?.id,
+                            setLoading
+                          });
+                        }}
+                      >
+                        <Text style={[styles.sidebarItemText, { color: '#3b82f6' }]}>🧪 Dev: Seed 16-Player Roster</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.sidebarItem, { borderColor: '#eab308' }]} 
+                        onPress={() => {
+                          setIsSidebarOpen(false);
+                          seedSeasonStats({
+                            activeTeamId,
+                            activeTeamName: activeTeamObj?.name,
+                            teamSheet,
+                            fetchTeamData,
+                            fetchMatchHistory,
+                            userId: session?.user?.id,
+                            setLoading
+                          });
+                        }}
+                      >
+                        <Text style={[styles.sidebarItemText, { color: '#eab308' }]}>🧪 Dev: Seed Full Season Stats</Text>
+                      </TouchableOpacity>
+
+                      <View style={{ marginVertical: 8, height: 1, backgroundColor: '#2E3A44' }} />
+                    </>
+                  )}
+
                   <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={exportMatchdaySummary}>
                     <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>📄 Export Branded PDF Report</Text>
                   </TouchableOpacity>
@@ -2879,31 +2926,10 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B0E14' },
-  
-  splashContainer: {
-    flex: 1,
-    backgroundColor: '#0B0E14',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  splashCenterBox: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '90%',
-  },
-  splashLogoImage: {
-    width: '100%',
-    height: 220,
-  },
-  splashLoadingText: {
-    color: '#94A3B8',
-    fontSize: 11,
-    fontWeight: 'bold',
-    letterSpacing: 2,
-    marginTop: 15,
-    textTransform: 'uppercase',
-  },
-
+  splashContainer: { flex: 1, backgroundColor: '#0B0E14', justifyContent: 'center', alignItems: 'center' },
+  splashCenterBox: { alignItems: 'center', justifyContent: 'center', width: '90%' },
+  splashLogoImage: { width: '100%', height: 220 },
+  splashLoadingText: { color: '#94A3B8', fontSize: 11, fontWeight: 'bold', letterSpacing: 2, marginTop: 15, textTransform: 'uppercase' },
   screenViewer: { flex: 1 },
   authContainer: { flex: 1, backgroundColor: '#0B0E14' },
   scrollAuthContainer: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
@@ -2912,7 +2938,6 @@ const styles = StyleSheet.create({
   authHeaderTitle: { color: '#ffffff', fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
   input: { backgroundColor: '#0B0E14', color: '#ffffff', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#2E3A44' },
   inputLabel: { color: '#94a3b8', fontWeight: 'bold', marginBottom: 6, fontSize: 12 },
-  miniLabel: { color: '#64748b', fontSize: 10, fontWeight: 'bold', marginBottom: 2 },
   primaryAuthBtn: { backgroundColor: '#39FF14', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 10 },
   primaryAuthBtnText: { color: '#0B0E14', fontWeight: 'bold', fontSize: 15 },
   switchAuthText: { color: '#94a3b8', textAlign: 'center', fontSize: 14 },
@@ -2954,7 +2979,6 @@ const styles = StyleSheet.create({
   headerTitle: { color: '#ffffff', fontSize: 22, fontWeight: 'bold' },
   content: { padding: 15 },
   card: { backgroundColor: '#1A1F26', borderRadius: 10, padding: 15, marginBottom: 15, borderColor: '#2E3A44', borderWidth: 1 },
-  cardTitle: { color: '#39FF14', fontWeight: 'bold', fontSize: 16, marginBottom: 10 },
   roleTitle: { color: '#ffffff', fontSize: 18, fontWeight: 'bold' },
   roleSubTitle: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', marginBottom: 10, textTransform: 'uppercase' },
   editProfileBtn: { backgroundColor: '#0B0E14', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#3b82f6' },
@@ -2989,8 +3013,6 @@ const styles = StyleSheet.create({
   footLabel: { color: '#94a3b8', fontWeight: 'bold', fontSize: 12 },
   footDot: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#2E3A44', backgroundColor: '#1A1F26' },
   footDotActive: { borderColor: '#39FF14', backgroundColor: '#39FF14' },
-  footDotSmall: { width: 8, height: 8, borderRadius: 4, borderWidth: 1, borderColor: '#2E3A44', backgroundColor: '#1A1F26' },
-  footDotSmallActive: { borderColor: '#39FF14', backgroundColor: '#39FF14' },
 
   statCounterRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#2E3A44', width: '100%' },
   statCounterLabel: { color: '#cbd5e1', fontWeight: 'bold', fontSize: 13 },

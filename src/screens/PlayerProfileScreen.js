@@ -20,6 +20,7 @@ export default function PlayerProfileScreen({
   matchHistory = [],
   setIsMatchArchiveOpen,
   liveTicker = [],
+  fetchLiveTicker,
   activeTeamId,
   matchPhase = 'PRE-MATCH',
   hasVotedMotm = false,
@@ -45,23 +46,24 @@ export default function PlayerProfileScreen({
   handleNextQuestion,
   handleRestartQuiz,
   renderProfileStatBar,
-  toggleRSVP
+  toggleRSVP,
+  setIsFaWebviewOpen,
+  faLeagueUrl = ''
 }) {
-  // Sync internal tab state if setPlayerTab prop is provided
   const [internalTab, setInternalTab] = useState('overview');
   const currentActiveTab = playerTab || internalTab;
 
-  // Header Toggle inside Roles Tab ('role' | 'pitch')
   const [pitchMainTab, setPitchMainTab] = useState('role');
-  // Sub-tab inside "Learn The Pitch" ('thirds' | 'zones18' | 'proZones' | 'jargon' | 'tips')
   const [pitchSubTab, setPitchSubTab] = useState('thirds');
 
-  // Voting is strictly unlocked ONLY when the 2nd half is actively in play
   const isVotingUnlocked = matchPhase === '2ND HALF';
   const isVoteButtonDisabled = hasVotedMotm || !isVotingUnlocked;
+  
+  const isAdultFanMode = appMode === 'parent' && String(teamAgeGroup || '').toLowerCase().includes('adult');
 
-  // Filter tabs by mode: Parents do NOT get the Role/s quiz tab
-  const visibleTabs = appMode === 'parent'
+  const visibleTabs = isAdultFanMode
+    ? [{ key: 'overview', label: 'Matchday Hub' }]
+    : appMode === 'parent'
     ? [
         { key: 'overview', label: 'Overview' },
         { key: 'radar', label: 'Report Card' },
@@ -74,12 +76,11 @@ export default function PlayerProfileScreen({
         { key: 'rsvp', label: 'RSVP' }
       ];
 
-  // Prevent Parent Mode from remaining stuck on 'roles' tab if mode is switched
   useEffect(() => {
-    if (appMode === 'parent' && currentActiveTab === 'roles') {
+    if ((appMode === 'parent' || isAdultFanMode) && (currentActiveTab === 'roles' || (isAdultFanMode && currentActiveTab !== 'overview'))) {
       changeTab('overview');
     }
-  }, [appMode]);
+  }, [appMode, teamAgeGroup]);
 
   const changeTab = (tabKey) => {
     if (setPlayerTab) setPlayerTab(tabKey);
@@ -88,7 +89,6 @@ export default function PlayerProfileScreen({
 
   const squad = (teamSheet && teamSheet.length > 0) ? teamSheet : (myLinkedPlayers || []);
 
-  // Formatted Quiz Explanation Renderer with Subheadings
   const renderQuizExplanation = (explanation) => {
     if (!explanation) return null;
 
@@ -125,52 +125,38 @@ export default function PlayerProfileScreen({
     );
   };
 
-  // Reusable Native Real Football Pitch Vector Lines Component
   const renderRealPitchCanvas = (children) => (
     <View style={styles.pitchCanvasFrame}>
-      {/* Top Goal Frame */}
       <View style={styles.pitchGoalTopFrame} />
-
-      {/* Main Pitch Turf Canvas with Markings */}
       <View style={styles.pitchTurfBody}>
-        {/* Pitch Boundary Lines */}
         <View style={styles.pitchOuterBoundary} />
-
-        {/* Halfway Line & Center Circle */}
         <View style={styles.pitchHalfwayLine} />
         <View style={styles.pitchCenterCircle} />
         <View style={styles.pitchCenterSpot} />
 
-        {/* Top Penalty Box & 6-Yard Goal Box */}
         <View style={styles.pitchPenaltyBoxTop} />
         <View style={styles.pitchGoalBoxTop} />
         <View style={styles.pitchPenaltySpotTop} />
         <View style={styles.pitchPenaltyArcTop} />
 
-        {/* Bottom Penalty Box & 6-Yard Goal Box */}
         <View style={styles.pitchPenaltyBoxBottom} />
         <View style={styles.pitchGoalBoxBottom} />
         <View style={styles.pitchPenaltySpotBottom} />
         <View style={styles.pitchPenaltyArcBottom} />
 
-        {/* Corner Arcs (Anchored inside pitch touchlines at 10px) */}
         <View style={[styles.cornerArc, { top: 10, left: 10, borderBottomRightRadius: 10 }]} />
         <View style={[styles.cornerArc, { top: 10, right: 10, borderBottomLeftRadius: 10 }]} />
         <View style={[styles.cornerArc, { bottom: 10, left: 10, borderTopRightRadius: 10 }]} />
         <View style={[styles.cornerArc, { bottom: 10, right: 10, borderTopLeftRadius: 10 }]} />
 
-        {/* Overlay Content */}
         <View style={styles.pitchOverlayLayer}>
           {children}
         </View>
       </View>
-
-      {/* Bottom Goal Frame */}
       <View style={styles.pitchGoalBottomFrame} />
     </View>
   );
 
-  // 4-Pillar Radar Chart Renderer
   const renderRadarChart = () => {
     const phy = Math.round(
       ((activePlayer?.phys_sprint || 5) +
@@ -230,10 +216,9 @@ export default function PlayerProfileScreen({
 
   return (
     <View style={styles.container}>
-      {/* SQUAD / PLAYER SELECTOR CHIPS */}
       <View style={styles.selectorBar}>
         <Text style={styles.selectorLabel}>
-          {appMode === 'parent' ? 'VIEWING PLAYER:' : 'SELECT PLAYER PROFILE:'}
+          {isAdultFanMode ? 'SQUAD MEMBERS:' : appMode === 'parent' ? 'VIEWING PLAYER:' : 'SELECT PLAYER PROFILE:'}
         </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
           {squad.map((p) => {
@@ -253,35 +238,33 @@ export default function PlayerProfileScreen({
         </ScrollView>
       </View>
 
-      {/* TACTICAL HUB BANNER */}
       <View style={styles.bannerRow}>
         <Text style={styles.bannerSub}>ACTIVE SYSTEM: {activeFormation}</Text>
-        <Text style={styles.bannerTitle}>Matchday Tactical Hub</Text>
+        <Text style={styles.bannerTitle}>{isAdultFanMode ? 'Fan Matchday Command' : 'Matchday Tactical Hub'}</Text>
       </View>
 
-      {/* SUB NAV TAB BAR */}
-      <View style={styles.subTabBar}>
-        {visibleTabs.map((tab) => {
-          const isActive = currentActiveTab === tab.key;
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={[styles.subTab, isActive && styles.subTabActive]}
-              onPress={() => changeTab(tab.key)}
-            >
-              <Text style={[styles.subTabText, isActive && styles.subTabTextActive]}>
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {!isAdultFanMode && (
+        <View style={styles.subTabBar}>
+          {visibleTabs.map((tab) => {
+            const isActive = currentActiveTab === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={[styles.subTab, isActive && styles.subTabActive]}
+                onPress={() => changeTab(tab.key)}
+              >
+                <Text style={[styles.subTabText, isActive && styles.subTabTextActive]}>
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
 
       <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
-        {/* TAB 1: OVERVIEW */}
         {currentActiveTab === 'overview' && (
           <>
-            {/* SEASON MATCHDAY STATS GRID */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>SEASON MATCHDAY STATS</Text>
               <View style={styles.statsGrid}>
@@ -323,7 +306,12 @@ export default function PlayerProfileScreen({
               </View>
             </View>
 
-            {/* LIVE MATCHDAY TICKER FEED */}
+            {isAdultFanMode && faLeagueUrl ? (
+              <TouchableOpacity style={styles.faLeagueBtnCard} onPress={() => setIsFaWebviewOpen && setIsFaWebviewOpen(true)}>
+                <Text style={styles.faLeagueBtnText}>🏆 View Official FA League Table ➔</Text>
+              </TouchableOpacity>
+            ) : null}
+
             <View style={styles.card}>
               <View style={styles.cardHeaderRow}>
                 <Text style={styles.cardTitle}>LIVE MATCH TICKER</Text>
@@ -350,7 +338,6 @@ export default function PlayerProfileScreen({
                 ))
               )}
 
-              {/* FAN POTM VOTE BUTTON */}
               {appMode === 'parent' && (
                 <TouchableOpacity
                   style={[
@@ -385,7 +372,6 @@ export default function PlayerProfileScreen({
               )}
             </View>
 
-            {/* OPPOSITION SCOUTING NOTES */}
             {!!scoutNotesInput && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>OPPOSITION SCOUTING REPORT</Text>
@@ -393,32 +379,31 @@ export default function PlayerProfileScreen({
               </View>
             )}
 
-            {/* FAMILY & FAN INVITES */}
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>SHARE PROFILE ACCESS</Text>
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 5 }}>
-                <TouchableOpacity
-                  style={[styles.roleToggleBtn, { borderColor: '#3B82F6' }]}
-                  onPress={() => shareFanInvite && shareFanInvite(activePlayer?.name, activePlayer?.family_code)}
-                >
-                  <Text style={[styles.roleToggleText, { color: '#3B82F6' }]}>📢 Share Fan Code</Text>
-                </TouchableOpacity>
+            {!isAdultFanMode && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>SHARE PROFILE ACCESS</Text>
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 5 }}>
+                  <TouchableOpacity
+                    style={[styles.roleToggleBtn, { borderColor: '#3B82F6' }]}
+                    onPress={() => shareFanInvite && shareFanInvite(activePlayer?.name, activePlayer?.family_code)}
+                  >
+                    <Text style={[styles.roleToggleText, { color: '#3B82F6' }]}>📢 Share Fan Code</Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.roleToggleBtn, { borderColor: '#39FF14' }]}
-                  onPress={() => shareCoParentInvite && shareCoParentInvite(activePlayer?.name, activePlayer?.family_code)}
-                >
-                  <Text style={[styles.roleToggleText, { color: '#39FF14' }]}>👨‍👩‍👦 Share Parent Code</Text>
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.roleToggleBtn, { borderColor: '#39FF14' }]}
+                    onPress={() => shareCoParentInvite && shareCoParentInvite(activePlayer?.name, activePlayer?.family_code)}
+                  >
+                    <Text style={[styles.roleToggleText, { color: '#39FF14' }]}>👨‍👩‍👦 Share Parent Code</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            )}
           </>
         )}
 
-        {/* TAB 2: ROLE/S & TACTICAL MANUAL + QUIZ + LEARN THE PITCH */}
-        {currentActiveTab === 'roles' && appMode !== 'parent' && (
+        {currentActiveTab === 'roles' && !isAdultFanMode && appMode !== 'parent' && (
           <>
-            {/* TOP DUAL HEADER NAVIGATION BUTTONS */}
             <View style={styles.pitchHeaderNavRow}>
               <TouchableOpacity
                 style={[styles.pitchHeaderBtn, pitchMainTab === 'role' && styles.pitchHeaderBtnActive]}
@@ -439,10 +424,8 @@ export default function PlayerProfileScreen({
               </TouchableOpacity>
             </View>
 
-            {/* MODE A: LEARN MY ROLE */}
             {pitchMainTab === 'role' && (
               <>
-                {/* PRIMARY / SECONDARY TOGGLES */}
                 <View style={styles.roleToggleRow}>
                   <TouchableOpacity
                     style={[styles.roleToggleBtn, viewingRoleToggle === 'primary' && styles.roleToggleBtnActive]}
@@ -465,7 +448,6 @@ export default function PlayerProfileScreen({
                   )}
                 </View>
 
-                {/* SUB-ROLE BUTTON PICKER */}
                 {isGroupedRole && (subRoleOptions || []).length > 0 && (
                   <View style={styles.subRoleCard}>
                     <Text style={styles.subRolePrompt}>Select Exact Matchday Role:</Text>
@@ -488,7 +470,6 @@ export default function PlayerProfileScreen({
                   </View>
                 )}
 
-                {/* TACTICAL INSTRUCTION BOX */}
                 <View style={styles.tacticalBox}>
                   <Text style={styles.tacticalBoxTitle}>{activeTactics?.title || `${activePlayer?.position || 'CM'} Role Guide`}</Text>
 
@@ -514,7 +495,6 @@ export default function PlayerProfileScreen({
                   )}
                 </View>
 
-                {/* INTERACTIVE TACTICAL QUIZ ENGINE */}
                 <View style={styles.card}>
                   <View style={styles.cardHeaderRow}>
                     <Text style={styles.cardTitle}>🧠 TACTICAL QUIZ & KNOWLEDGE CHECK</Text>
@@ -532,7 +512,6 @@ export default function PlayerProfileScreen({
                         {currentQuiz.question}
                       </Text>
 
-                      {/* Options */}
                       {(currentQuiz.options || []).map((opt, idx) => {
                         const isSelected = quizState?.selectedIdx === idx;
                         let btnStyle = styles.quizOptionBtn;
@@ -560,7 +539,6 @@ export default function PlayerProfileScreen({
                         );
                       })}
 
-                      {/* Explanation with formatted subheadings */}
                       {quizState?.answered && (
                         <View style={styles.explanationBox}>
                           <Text style={{ color: quizState.isCorrect ? '#39FF14' : '#EF4444', fontWeight: 'bold', fontSize: 15, marginBottom: 8 }}>
@@ -588,10 +566,8 @@ export default function PlayerProfileScreen({
               </>
             )}
 
-            {/* MODE B: LEARN THE PITCH */}
             {pitchMainTab === 'pitch' && (
               <View style={{ marginBottom: 20 }}>
-                {/* SUB-TABS: 3rds | 18 Zones | Pro Zones | Pitch Vocab | Tips */}
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 15 }}>
                   <TouchableOpacity
                     style={[styles.pitchSubTabBtn, pitchSubTab === 'thirds' && styles.pitchSubTabBtnActive]}
@@ -629,13 +605,11 @@ export default function PlayerProfileScreen({
                   </TouchableOpacity>
                 </ScrollView>
 
-                {/* SUB-TAB 1: THE 3RDS */}
                 {pitchSubTab === 'thirds' && (
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>THE 3 BASIC PITCH ZONES (REAL PITCH VIEW)</Text>
                     <Text style={styles.bulletText}>The pitch is divided horizontally into 3 primary zones along the direction of play:</Text>
 
-                    {/* REALISTIC VERTICAL FOOTBALL PITCH CANVAS */}
                     {renderRealPitchCanvas(
                       <View style={{ flex: 1 }}>
                         <View style={[styles.pitchOverlayThird, { backgroundColor: 'rgba(57, 255, 20, 0.22)', borderBottomWidth: 2, borderBottomColor: '#39FF14', borderStyle: 'dashed' }]}>
@@ -661,37 +635,29 @@ export default function PlayerProfileScreen({
                       </View>
                     )}
 
-                    {/* DESCRIPTIONS */}
                     <View style={styles.zoneDescCard}>
                       <Text style={[styles.zoneDescHeading, { color: '#39FF14' }]}>🔥 Attacking 3rd</Text>
                       <Text style={styles.zoneDescBody}>The area closest to opposition goal. Express creativity, isolation 1v1s, overloads, and high pressing.</Text>
-
                       <Text style={[styles.zoneDescHeading, { color: '#3B82F6', marginTop: 10 }]}>🧠 Midfield 3rd</Text>
                       <Text style={styles.zoneDescBody}>The engine room. Dictate match tempo, switch play, and execute line-breaking passes into forwards.</Text>
-
                       <Text style={[styles.zoneDescHeading, { color: '#F59E0B', marginTop: 10 }]}>🛡️ Defensive 3rd</Text>
                       <Text style={styles.zoneDescBody}>Low-risk territory. Clear communication, clean progression out from goalkeeper, and total box security.</Text>
                     </View>
                   </View>
                 )}
 
-                {/* SUB-TAB 2: THE 18 ADVANCED ZONES */}
                 {pitchSubTab === 'zones18' && (
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>THE 18 ADVANCED PITCH ZONES</Text>
                     <Text style={styles.bulletText}>Professional academies divide the pitch into an 18-zone grid to measure spatial control. <Text style={{ color: '#39FF14', fontWeight: 'bold' }}>Zone 14 is the Golden Zone!</Text></Text>
 
-                    {/* REALISTIC VERTICAL FOOTBALL PITCH CANVAS WITH 18 GRID */}
                     {renderRealPitchCanvas(
                       <View style={styles.grid18Container}>
-                        {/* Row 1 (Attacking Penalty Box) */}
                         <View style={styles.grid18Row}>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>16</Text></View>
                           <View style={[styles.grid18Cell, styles.grid18BoxCell]}><Text style={styles.grid18Text}>17</Text></View>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>18</Text></View>
                         </View>
-
-                        {/* Row 2 (Zone 14 Row) */}
                         <View style={styles.grid18Row}>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>13</Text></View>
                           <View style={[styles.grid18Cell, styles.grid18GoldenCell]}>
@@ -699,29 +665,21 @@ export default function PlayerProfileScreen({
                           </View>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>15</Text></View>
                         </View>
-
-                        {/* Row 3 (Attacking Midfield) */}
                         <View style={styles.grid18Row}>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>10</Text></View>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>11</Text></View>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>12</Text></View>
                         </View>
-
-                        {/* Row 4 (Defensive Midfield) */}
                         <View style={styles.grid18Row}>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>7</Text></View>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>8</Text></View>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>9</Text></View>
                         </View>
-
-                        {/* Row 5 (Build-up Area) */}
                         <View style={styles.grid18Row}>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>4</Text></View>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>5</Text></View>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>6</Text></View>
                         </View>
-
-                        {/* Row 6 (Defensive Penalty Box) */}
                         <View style={styles.grid18Row}>
                           <View style={styles.grid18Cell}><Text style={styles.grid18Text}>1</Text></View>
                           <View style={[styles.grid18Cell, styles.grid18BoxCell]}><Text style={styles.grid18Text}>2</Text></View>
@@ -730,18 +688,15 @@ export default function PlayerProfileScreen({
                       </View>
                     )}
 
-                    {/* ZONE 14 EXPLANATION CARD */}
                     <View style={styles.zoneDescCard}>
                       <Text style={[styles.zoneDescHeading, { color: '#39FF14' }]}>🌟 Zone 14 ("The Hole")</Text>
                       <Text style={styles.zoneDescBody}>The central area right outside the opponent's penalty box. Controlling Zone 14 yields the highest goal probability in modern football.</Text>
-
                       <Text style={[styles.zoneDescHeading, { color: '#3B82F6', marginTop: 10 }]}>⚡ Zones 13 & 15 (Advanced Half-Spaces)</Text>
                       <Text style={styles.zoneDescBody}>Flanking Zone 14. Excellent angles for diagonal through-balls and crossing into Zone 17.</Text>
                     </View>
                   </View>
                 )}
 
-                {/* SUB-TAB 3: PRO SPATIAL CORRIDORS (HALF-SPACE SPLIT ACROSS CENTER LINE INTO 'SPACE' & 'HALF') */}
                 {pitchSubTab === 'proZones' && (
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>THE 5 PROFESSIONAL SPATIAL CORRIDORS</Text>
@@ -749,7 +704,6 @@ export default function PlayerProfileScreen({
                       Box-to-box central spine & half-spaces, with Left & Right Channels segmented into 6 tactical wide zones.
                     </Text>
 
-                    {/* Header Label Bar Outside Pitch Turf (Clean Top Placement) */}
                     <View style={styles.corridorHeaderLabelBar}>
                       <Text style={styles.corridorLabelText}>LEFT CHANNEL</Text>
                       <Text style={[styles.corridorLabelText, { color: '#39FF14' }]}>HALF-SPACE</Text>
@@ -758,10 +712,8 @@ export default function PlayerProfileScreen({
                       <Text style={styles.corridorLabelText}>RIGHT CHANNEL</Text>
                     </View>
 
-                    {/* REALISTIC VERTICAL FOOTBALL PITCH CANVAS */}
                     {renderRealPitchCanvas(
                       <View style={styles.proCorridorCanvasContainer}>
-                        {/* Col 1: Left Channel (6 Stacked Equal Segments with Thin Neon Lines) */}
                         <View style={styles.wideChannelCol}>
                           {[0, 1, 2, 3, 4, 5].map((_, idx) => (
                             <View key={idx} style={styles.wideSegmentCell}>
@@ -770,7 +722,6 @@ export default function PlayerProfileScreen({
                           ))}
                         </View>
 
-                        {/* Col 2: Left Half-Space (Unsplit Box-to-Box Column with SPLIT SPACE & HALF Across Center Line) */}
                         <View style={styles.halfSpaceCol}>
                           <View style={styles.boxSpacerTop} />
                           <View style={[styles.boxToBoxSection, styles.corridorHighlightMiddle]}>
@@ -784,7 +735,6 @@ export default function PlayerProfileScreen({
                           <View style={styles.boxSpacerBottom} />
                         </View>
 
-                        {/* Col 3: Central Channel (Unsplit Box-to-Box Column with SPLIT CHANNEL & CENTRAL) */}
                         <View style={styles.centralChannelCol}>
                           <View style={styles.boxSpacerTop} />
                           <View style={styles.boxToBoxSection}>
@@ -798,7 +748,6 @@ export default function PlayerProfileScreen({
                           <View style={styles.boxSpacerBottom} />
                         </View>
 
-                        {/* Col 4: Right Half-Space (Unsplit Box-to-Box Column with SPLIT SPACE & HALF Across Center Line) */}
                         <View style={styles.halfSpaceCol}>
                           <View style={styles.boxSpacerTop} />
                           <View style={[styles.boxToBoxSection, styles.corridorHighlightMiddle]}>
@@ -812,7 +761,6 @@ export default function PlayerProfileScreen({
                           <View style={styles.boxSpacerBottom} />
                         </View>
 
-                        {/* Col 5: Right Channel (6 Stacked Equal Segments with Thin Neon Lines) */}
                         <View style={styles.wideChannelCol}>
                           {[0, 1, 2, 3, 4, 5].map((_, idx) => (
                             <View key={idx} style={styles.wideSegmentCell}>
@@ -823,13 +771,11 @@ export default function PlayerProfileScreen({
                       </View>
                     )}
 
-                    {/* CORRIDOR EXPLANATIONS */}
                     <View style={styles.zoneDescCard}>
                       <Text style={[styles.zoneDescHeading, { color: '#39FF14' }]}>🟩 Half-Space (Box-to-Box Goldmine)</Text>
                       <Text style={styles.zoneDescBody}>
                         Runs continuously between penalty boxes. Operating here forces opposition defenders into hesitation—too far wide for centre-backs, too narrow for full-backs!
                       </Text>
-
                       <Text style={[styles.zoneDescHeading, { color: '#3B82F6', marginTop: 10 }]}>🛣️ Left & Right Channels (6 Wide Segments)</Text>
                       <Text style={styles.zoneDescBody}>
                         Segmented into 6 zones along the touchlines outside the 18-yard boxes for wingers and wing-backs to isolate 1v1s or cross.
@@ -838,7 +784,6 @@ export default function PlayerProfileScreen({
                   </View>
                 )}
 
-                {/* SUB-TAB 4: PITCH VOCAB & MATCH JARGON */}
                 {pitchSubTab === 'jargon' && (
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>ESSENTIAL MATCHDAY VOCABULARY</Text>
@@ -848,22 +793,18 @@ export default function PlayerProfileScreen({
                       <Text style={styles.jargonTitle}>🏃‍♂️ "Down the Line"</Text>
                       <Text style={styles.jargonBody}>A vertical pass sent along the touchline into open space for a wide winger or overlapping full-back.</Text>
                     </View>
-
                     <View style={styles.jargonItem}>
                       <Text style={styles.jargonTitle}>📐 "Square It"</Text>
                       <Text style={styles.jargonBody}>Passing laterally straight across the pitch or face of goal to a teammate with a clearer angle.</Text>
                     </View>
-
                     <View style={styles.jargonItem}>
                       <Text style={styles.jargonTitle}>🗡️ "Play Me Through"</Text>
                       <Text style={styles.jargonBody}>Calling for a weighted pass into open space behind the defensive line for a sprinting forward.</Text>
                     </View>
-
                     <View style={styles.jargonItem}>
                       <Text style={styles.jargonTitle}>🔄 "On the Half-Turn"</Text>
                       <Text style={styles.jargonBody}>Receiving the ball angled sideways so you can see both the passer and the attacking goal in one fluid touch.</Text>
                     </View>
-
                     <View style={styles.jargonItem}>
                       <Text style={styles.jargonTitle}>🔁 "Overlap vs. Underlap"</Text>
                       <Text style={styles.jargonBody}>
@@ -871,7 +812,6 @@ export default function PlayerProfileScreen({
                         <Text style={{ color: '#3B82F6', fontWeight: 'bold' }}>Underlap:</Text> Sprinting inside through the half-space.
                       </Text>
                     </View>
-
                     <View style={styles.jargonItem}>
                       <Text style={styles.jargonTitle}>⚡ "Third-Man Run"</Text>
                       <Text style={styles.jargonBody}>A dummy runner draws defenders while a 3rd unseen player sprints into space to receive the pass.</Text>
@@ -879,7 +819,6 @@ export default function PlayerProfileScreen({
                   </View>
                 )}
 
-                {/* SUB-TAB 5: TIPS & LEGAL RULE HACKS */}
                 {pitchSubTab === 'tips' && (
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>💡 TACTICAL EXPLOITS & RULE HACKS</Text>
@@ -892,7 +831,6 @@ export default function PlayerProfileScreen({
                         <Text style={{ color: '#3B82F6', fontWeight: 'bold' }}>The Exploit:</Text> On long throw-ins, a striker can stand in an "extreme offside" position behind the opponent's entire defense next to the goalkeeper and legally score unchecked!
                       </Text>
                     </View>
-
                     <View style={styles.jargonItem}>
                       <Text style={styles.jargonTitle}>⚽ 2. Goal Kick Inside-the-Box Progression</Text>
                       <Text style={styles.jargonBody}>
@@ -900,7 +838,6 @@ export default function PlayerProfileScreen({
                         <Text style={{ color: '#3B82F6', fontWeight: 'bold' }}>The Exploit:</Text> Drop defenders inside the box to invite opposition high presses, creating massive space in midfield to break through in 2 passes.
                       </Text>
                     </View>
-
                     <View style={styles.jargonItem}>
                       <Text style={styles.jargonTitle}>⚡ 3. The Quick Free-Kick Blitz</Text>
                       <Text style={styles.jargonBody}>
@@ -908,7 +845,6 @@ export default function PlayerProfileScreen({
                         <Text style={{ color: '#3B82F6', fontWeight: 'bold' }}>The Exploit:</Text> Never ask for a wall if an opponent turns their back—pass instantly to a teammate into goal while they argue.
                       </Text>
                     </View>
-
                     <View style={styles.jargonItem}>
                       <Text style={styles.jargonTitle}>🎯 4. Zero Offside on Corner Kicks & Goal Kicks</Text>
                       <Text style={styles.jargonBody}>
@@ -916,7 +852,6 @@ export default function PlayerProfileScreen({
                         <Text style={{ color: '#3B82F6', fontWeight: 'bold' }}>The Exploit:</Text> On short corner routines or long goal kicks, attackers can stand in unmarkable positions behind the line.
                       </Text>
                     </View>
-
                     <View style={styles.jargonItem}>
                       <Text style={styles.jargonTitle}>🛡️ 5. Legal Ball Shielding Over the Touchline</Text>
                       <Text style={styles.jargonBody}>
@@ -924,7 +859,6 @@ export default function PlayerProfileScreen({
                         <Text style={{ color: '#3B82F6', fontWeight: 'bold' }}>The Exploit:</Text> Shield rolling balls out of bounds without kicking them to win goal kicks or throw-ins without risk.
                       </Text>
                     </View>
-
                     <View style={styles.jargonItem}>
                       <Text style={styles.jargonTitle}>🧤 6. Goalkeeper Hand-to-Foot Release Exploits</Text>
                       <Text style={styles.jargonBody}>
@@ -939,36 +873,29 @@ export default function PlayerProfileScreen({
           </>
         )}
 
-        {/* TAB 3: REPORT CARD */}
-        {currentActiveTab === 'radar' && (
+        {currentActiveTab === 'radar' && !isAdultFanMode && (
           <>
             {renderRadarChart()}
-
-            {/* COACH OBSERVATIONS & DEVELOPMENT NOTES */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>COACH OBSERVATIONS & DEVELOPMENT NOTES</Text>
-
               {activePlayer?.notes_weaknesses ? (
                 <View style={{ marginBottom: 12 }}>
                   <Text style={styles.sectionSubHeader}>🎯 AREAS FOR IMPROVEMENT</Text>
                   <Text style={styles.bulletText}>{activePlayer.notes_weaknesses}</Text>
                 </View>
               ) : null}
-
               {activePlayer?.notes_communication ? (
                 <View style={{ marginBottom: 12 }}>
                   <Text style={styles.sectionSubHeader}>🗣️ COMMUNICATION & LEADERSHIP</Text>
                   <Text style={styles.bulletText}>{activePlayer.notes_communication}</Text>
                 </View>
               ) : null}
-
               {activePlayer?.notes_notes ? (
                 <View style={{ marginBottom: 12 }}>
                   <Text style={styles.sectionSubHeader}>📝 GENERAL COACH NOTES</Text>
                   <Text style={styles.bulletText}>{activePlayer.notes_notes}</Text>
                 </View>
               ) : null}
-
               {!activePlayer?.notes_weaknesses && !activePlayer?.notes_communication && !activePlayer?.notes_notes && (
                 <Text style={styles.emptyText}>No coach observations recorded yet for this player.</Text>
               )}
@@ -976,7 +903,6 @@ export default function PlayerProfileScreen({
 
             <View style={styles.card}>
               <Text style={styles.cardTitle}>DETAILED ATTRIBUTE BREAKDOWN</Text>
-
               <Text style={styles.sectionSubHeader}>TECHNICAL ABILITIES</Text>
               {renderProfileStatBar ? (
                 <>
@@ -987,7 +913,6 @@ export default function PlayerProfileScreen({
                   {renderProfileStatBar('Tackling & Recovery', activePlayer?.tech_tackling)}
                 </>
               ) : null}
-
               <Text style={[styles.sectionSubHeader, { marginTop: 15 }]}>PHYSICAL PROFILE</Text>
               {renderProfileStatBar ? (
                 <>
@@ -997,7 +922,6 @@ export default function PlayerProfileScreen({
                   {renderProfileStatBar('Strength & Duels', activePlayer?.phys_strength)}
                 </>
               ) : null}
-
               <Text style={[styles.sectionSubHeader, { marginTop: 15 }]}>TACTICAL & PSYCHOLOGICAL</Text>
               {renderProfileStatBar ? (
                 <>
@@ -1011,13 +935,10 @@ export default function PlayerProfileScreen({
           </>
         )}
 
-        {/* TAB 4: RSVP */}
-        {currentActiveTab === 'rsvp' && (
+        {currentActiveTab === 'rsvp' && !isAdultFanMode && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>NEXT FIXTURE RSVP STATUS</Text>
-            <Text style={styles.bulletText}>
-              Confirm player availability for the upcoming matchday fixture:
-            </Text>
+            <Text style={styles.bulletText}>Confirm player availability for the upcoming matchday fixture:</Text>
             <TouchableOpacity
               style={[styles.rsvpBtn, activePlayer?.available ? styles.rsvpActive : styles.rsvpInactive]}
               onPress={() => toggleRSVP && toggleRSVP(activePlayer)}
@@ -1050,15 +971,16 @@ const styles = StyleSheet.create({
   subTabText: { color: '#64748B', fontWeight: 'bold', fontSize: 13 },
   subTabTextActive: { color: '#FFFFFF' },
   content: { padding: 15 },
-  
-  // Dual Pitch Header Navigation
+
+  faLeagueBtnCard: { backgroundColor: '#1A1F26', padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#3B82F6', marginBottom: 15, alignItems: 'center' },
+  faLeagueBtnText: { color: '#3B82F6', fontWeight: 'bold', fontSize: 14 },
+
   pitchHeaderNavRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
   pitchHeaderBtn: { flex: 1, paddingVertical: 14, borderRadius: 10, backgroundColor: '#1A1F26', borderWidth: 1, borderColor: '#2E3A44', alignItems: 'center' },
   pitchHeaderBtnActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
   pitchHeaderBtnText: { color: '#94A3B8', fontSize: 14, fontWeight: 'bold' },
   pitchHeaderBtnTextActive: { color: '#0B0E14' },
 
-  // Pitch Sub-Tabs
   pitchSubTabBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#0B0E14', borderWidth: 1, borderColor: '#2E3A44' },
   pitchSubTabBtnActive: { backgroundColor: '#3B82F6', borderColor: '#3B82F6' },
   pitchSubTabText: { color: '#94A3B8', fontSize: 12, fontWeight: 'bold' },
@@ -1093,7 +1015,6 @@ const styles = StyleSheet.create({
   neonBtnText: { color: '#0B0E14', fontWeight: 'bold', fontSize: 13 },
   emptyText: { color: '#64748B', fontSize: 12, fontStyle: 'italic' },
 
-  // Ticker Feed
   liveMatchStatusBadge: { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderWidth: 1, borderColor: '#EF4444', padding: 8, borderRadius: 6, marginBottom: 12, alignItems: 'center' },
   liveMatchStatusText: { color: '#EF4444', fontWeight: 'bold', fontSize: 11 },
   tickerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#2E3A44', gap: 8 },
@@ -1101,7 +1022,6 @@ const styles = StyleSheet.create({
   tickerIcon: { fontSize: 14 },
   tickerMessage: { color: '#FFFFFF', fontSize: 13, flex: 1 },
 
-  // Quiz Options & Formatted Breakdown
   quizOptionBtn: { backgroundColor: '#0B0E14', padding: 14, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44', marginBottom: 8 },
   quizOptionText: { color: '#CBD5E1', fontSize: 13, fontWeight: 'bold' },
   explanationBox: { backgroundColor: '#0B0E14', padding: 14, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44', marginTop: 12 },
@@ -1111,7 +1031,6 @@ const styles = StyleSheet.create({
   optionBreakdownHeading: { fontWeight: 'bold', fontSize: 13 },
   explanationBodyText: { color: '#CBD5E1', fontSize: 12, lineHeight: 18, marginBottom: 4 },
 
-  // REAL FOOTBALL PITCH CANVAS STYLES
   pitchCanvasFrame: {
     width: '100%',
     marginVertical: 10,
@@ -1136,7 +1055,7 @@ const styles = StyleSheet.create({
   pitchTurfBody: {
     width: '100%',
     height: 380,
-    backgroundColor: '#0D2B16', // Deep green turf
+    backgroundColor: '#0D2B16',
     borderRadius: 8,
     borderWidth: 2,
     borderColor: '#1E4D2B',
@@ -1273,7 +1192,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.85)',
   },
 
-  // OVERLAY LAYERS
   pitchOverlayLayer: {
     position: 'absolute',
     top: 10,
@@ -1283,7 +1201,6 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
 
-  // 3rds Pitch Diagram Overlay
   pitchOverlayThird: {
     flex: 1,
     justifyContent: 'center',
@@ -1328,7 +1245,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // 18 Zones Grid Overlay
   grid18Container: {
     flex: 1,
   },
@@ -1364,7 +1280,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 
-  // PRO CORRIDORS STYLES
   corridorHeaderLabelBar: {
     flexDirection: 'row',
     width: '100%',
@@ -1416,10 +1331,10 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
   },
   boxSpacerTop: {
-    height: 55, // Strictly matches top 18-yard penalty box depth
+    height: 55,
   },
   boxSpacerBottom: {
-    height: 55, // Strictly matches bottom 18-yard penalty box depth
+    height: 55,
   },
   boxToBoxSection: {
     flex: 1,
@@ -1435,13 +1350,13 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingBottom: 20, // Pushes upper label above the center circle
+    paddingBottom: 20,
   },
   centralHalfBottom: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingTop: 20, // Pushes lower label below the center circle
+    paddingTop: 20,
   },
   corridorHighlightMiddle: {
     backgroundColor: 'rgba(57, 255, 20, 0.28)',
@@ -1456,7 +1371,6 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '-90deg' }],
   },
 
-  // Pitch Vocab Jargon List
   jargonItem: {
     backgroundColor: '#0B0E14',
     padding: 12,
@@ -1477,7 +1391,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // Radar Chart Graphic
   radarCardBox: { backgroundColor: '#1A1F26', borderRadius: 12, padding: 16, marginBottom: 15, borderWidth: 1, borderColor: '#2E3A44', alignItems: 'center' },
   radarGraphicContainer: { width: 240, height: 240, justifyContent: 'center', alignItems: 'center', marginVertical: 20, position: 'relative' },
   radarGridRing: { position: 'absolute', borderRadius: 120, borderWidth: 1, borderColor: '#2E3A44' },
@@ -1489,7 +1402,6 @@ const styles = StyleSheet.create({
   legendText: { color: '#CBD5E1', fontSize: 11, fontWeight: 'bold' },
   sectionSubHeader: { color: '#39FF14', fontSize: 11, fontWeight: 'bold', letterSpacing: 0.5, marginBottom: 6 },
 
-  // RSVP
   rsvpBtn: { padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 10 },
   rsvpActive: { backgroundColor: '#15803D' },
   rsvpInactive: { backgroundColor: '#991B1B' },
