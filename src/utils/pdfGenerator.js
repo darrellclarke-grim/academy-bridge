@@ -72,18 +72,52 @@ export const generateSeasonPdfReport = async ({
       ? `<img src="${footerLogoBase64}" class="footer-logo" alt="Powered by Tactical Engine" />`
       : fallbackFooterSvg;
 
-    // Render squad rows (Position in Dark Slate #334155 for crisp legibility)
-    const playerRowsHtml = (teamSheet || []).map((p, idx) => `
-      <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
-        <td class="stat-green" style="padding: 7px 8px; font-weight: bold; text-align: center;">#${p.squad_number || '-'}</td>
-        <td class="text-primary" style="padding: 7px 8px; font-weight: bold;">${p.name || 'Player'}</td>
-        <td class="pos-text" style="padding: 7px 8px; text-align: center;">${p.position || 'N/A'}</td>
-        <td class="text-primary" style="padding: 7px 8px; text-align: center;">${p.apps || 0}</td>
-        <td class="stat-green" style="padding: 7px 8px; text-align: center; font-weight: bold;">${p.goals || 0}</td>
-        <td class="text-primary" style="padding: 7px 8px; text-align: center;">${p.assists || 0}</td>
-        <td class="text-primary" style="padding: 7px 8px; text-align: center;">${p.motm || 0}</td>
-      </tr>
-    `).join('');
+    // Calculate Team Record Analytics
+    const totalMatches = matchHistory.length;
+    const wins = matchHistory.filter(m => m.result === 'W').length;
+    const draws = matchHistory.filter(m => m.result === 'D').length;
+    const losses = matchHistory.filter(m => m.result === 'L').length;
+    const goalsFor = matchHistory.reduce((sum, m) => sum + (m.team_score || 0), 0);
+    const goalsAgainst = matchHistory.reduce((sum, m) => sum + (m.opponent_score || 0), 0);
+    const goalDiff = goalsFor - goalsAgainst;
+    const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
+
+    // Calculate Individual Season Honours
+    const sortedByGoals = [...teamSheet].sort((a, b) => (b.goals || 0) - (a.goals || 0));
+    const sortedByAssists = [...teamSheet].sort((a, b) => (b.assists || 0) - (a.assists || 0));
+    const sortedByPotm = [...teamSheet].sort((a, b) => ((b.motm || 0) + (b.parent_motm || 0)) - ((a.motm || 0) + (a.parent_motm || 0)));
+
+    const topScorer = sortedByGoals[0]?.goals > 0 
+      ? `${sortedByGoals[0].name} (${sortedByGoals[0].goals} Goals)` 
+      : 'N/A';
+    
+    const topAssister = sortedByAssists[0]?.assists > 0 
+      ? `${sortedByAssists[0].name} (${sortedByAssists[0].assists} Assists)` 
+      : 'N/A';
+    
+    const topPotm = sortedByPotm[0] && ((sortedByPotm[0].motm || 0) + (sortedByPotm[0].parent_motm || 0) > 0)
+      ? `${sortedByPotm[0].name} (${(sortedByPotm[0].motm || 0) + (sortedByPotm[0].parent_motm || 0)} Total Awards)` 
+      : 'N/A';
+
+    // Render squad rows with master stats
+    const playerRowsHtml = (teamSheet || []).map((p, idx) => {
+      const totalMins = p.total_minutes_played || 0;
+      const avgMins = p.apps > 0 ? Math.round(totalMins / p.apps) : 0;
+      const totalPotm = (p.motm || 0) + (p.parent_motm || 0);
+
+      return `
+        <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
+          <td class="stat-green" style="padding: 7px 8px; font-weight: bold; text-align: center;">#${p.squad_number || '-'}</td>
+          <td class="text-primary" style="padding: 7px 8px; font-weight: bold;">${p.name || 'Player'}</td>
+          <td class="pos-text" style="padding: 7px 8px; text-align: center;">${p.position || 'N/A'}</td>
+          <td class="text-primary" style="padding: 7px 8px; text-align: center;">${p.apps || 0}</td>
+          <td class="text-sub" style="padding: 7px 8px; text-align: center;">${totalMins}m (${avgMins}m/g)</td>
+          <td class="stat-green" style="padding: 7px 8px; text-align: center; font-weight: bold;">${p.goals || 0}</td>
+          <td class="text-primary" style="padding: 7px 8px; text-align: center;">${p.assists || 0}</td>
+          <td class="text-primary" style="padding: 7px 8px; text-align: center;">${totalPotm}</td>
+        </tr>
+      `;
+    }).join('');
 
     // Render match history rows
     const matchRowsHtml = (matchHistory || []).map((m, idx) => `
@@ -91,7 +125,7 @@ export const generateSeasonPdfReport = async ({
         <td class="text-sub" style="padding: 7px 8px;">${m.created_at ? new Date(m.created_at).toLocaleDateString() : 'Season Match'}</td>
         <td class="text-primary" style="padding: 7px 8px; font-weight: bold;">vs ${m.opponent_name || m.opponent || 'Opponent'}</td>
         <td class="stat-green" style="padding: 7px 8px; font-weight: bold; text-align: center;">${m.team_score ?? 0} - ${m.opponent_score ?? 0}</td>
-        <td class="text-primary" style="padding: 7px 8px; text-align: center;">${m.match_type || 'Match'}</td>
+        <td class="text-primary" style="padding: 7px 8px; text-align: center;">${m.result || 'D'} (${m.match_type || 'Match'})</td>
       </tr>
     `).join('');
 
@@ -101,7 +135,7 @@ export const generateSeasonPdfReport = async ({
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <title>Season Tactical Report</title>
+          <title>Executive Season Report</title>
           <style>
             * {
               box-sizing: border-box;
@@ -154,6 +188,29 @@ export const generateSeasonPdfReport = async ({
               letter-spacing: 1px;
               margin-bottom: 8px;
             }
+            .honours-grid {
+              display: table;
+              width: 100%;
+              margin-bottom: 4px;
+            }
+            .honours-col {
+              display: table-cell;
+              width: 33.33%;
+              vertical-align: top;
+              padding-right: 10px;
+            }
+            .honour-label {
+              font-size: 10px;
+              font-weight: bold;
+              color: #64748B;
+              text-transform: uppercase;
+            }
+            .honour-value {
+              font-size: 12px;
+              font-weight: bold;
+              color: #0F172A;
+              margin-top: 2px;
+            }
             table {
               width: 100%;
               border-collapse: collapse;
@@ -171,7 +228,7 @@ export const generateSeasonPdfReport = async ({
             .row-odd { background-color: #F8FAFC; border-bottom: 1px solid #E2E8F0; }
             .text-primary { color: #0F172A; }
             .text-sub { color: #64748B; }
-            .pos-text { color: #334155; font-weight: bold; } /* Dark charcoal for crisp position reading */
+            .pos-text { color: #334155; font-weight: bold; }
             .stat-green { color: #15803D; }
 
             .header-logo-cell {
@@ -203,7 +260,7 @@ export const generateSeasonPdfReport = async ({
           </style>
         </head>
         <body>
-          <!-- PAGE 1: HEADER, TACTICAL SUMMARY & SQUAD ANALYTICS -->
+          <!-- HEADER -->
           <table class="header-table">
             <tr>
               <td style="vertical-align: middle;">
@@ -216,15 +273,54 @@ export const generateSeasonPdfReport = async ({
             </tr>
           </table>
 
+          <!-- TEAM RECORD SUMMARY -->
+          <div class="card">
+            <div class="card-title">📊 TEAM RECORD & PERFORMANCE SUMMARY</div>
+            <div class="honours-grid">
+              <div class="honours-col">
+                <div class="honour-label">Matches Played</div>
+                <div class="honour-value">${totalMatches} Games</div>
+              </div>
+              <div class="honours-col">
+                <div class="honour-label">Season Record</div>
+                <div class="honour-value" style="color: #15803D;">${wins}W - ${draws}D - ${losses}L (${winRate}% Win Rate)</div>
+              </div>
+              <div class="honours-col">
+                <div class="honour-label">Goals (GD)</div>
+                <div class="honour-value">${goalsFor} Scored / ${goalsAgainst} Conceded (${goalDiff > 0 ? '+' : ''}${goalDiff})</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- INDIVIDUAL HONOURS -->
+          <div class="card">
+            <div class="card-title">⭐ INDIVIDUAL SEASON HONOURS</div>
+            <div class="honours-grid">
+              <div class="honours-col">
+                <div class="honour-label">🏆 Golden Boot</div>
+                <div class="honour-value">${topScorer}</div>
+              </div>
+              <div class="honours-col">
+                <div class="honour-label">🅰️ Playmaker Award</div>
+                <div class="honour-value">${topAssister}</div>
+              </div>
+              <div class="honours-col">
+                <div class="honour-label">🌟 Overall POTM Leader</div>
+                <div class="honour-value">${topPotm}</div>
+              </div>
+            </div>
+          </div>
+
           ${scoutNotes ? `
             <div class="card">
-              <div class="card-title">HEAD COACH TACTICAL SUMMARY</div>
+              <div class="card-title">HEAD COACH SEASON REVIEW</div>
               <p class="text-primary" style="font-size: 11px; line-height: 1.4; margin: 0;">${scoutNotes}</p>
             </div>
           ` : ''}
 
+          <!-- SQUAD MASTER ANALYTICS -->
           <div class="card">
-            <div class="card-title">SQUAD PLAYER ANALYTICS</div>
+            <div class="card-title">👥 SQUAD MASTER STATS BREAKDOWN</div>
             <table>
               <thead>
                 <tr>
@@ -232,13 +328,14 @@ export const generateSeasonPdfReport = async ({
                   <th>PLAYER</th>
                   <th style="text-align: center;">POS</th>
                   <th style="text-align: center;">APPS</th>
+                  <th style="text-align: center;">MINS</th>
                   <th style="text-align: center;">GOALS</th>
                   <th style="text-align: center;">ASSISTS</th>
                   <th style="text-align: center;">POTM</th>
                 </tr>
               </thead>
               <tbody>
-                ${playerRowsHtml.length > 0 ? playerRowsHtml : '<tr><td colspan="7" class="text-sub" style="padding:8px; text-align:center;">No player data available.</td></tr>'}
+                ${playerRowsHtml.length > 0 ? playerRowsHtml : '<tr><td colspan="8" class="text-sub" style="padding:8px; text-align:center;">No player data available.</td></tr>'}
               </tbody>
             </table>
           </div>
@@ -252,7 +349,7 @@ export const generateSeasonPdfReport = async ({
                   <th>DATE</th>
                   <th>OPPONENT</th>
                   <th style="text-align: center;">SCORE</th>
-                  <th style="text-align: center;">TYPE</th>
+                  <th style="text-align: center;">RESULT & TYPE</th>
                 </tr>
               </thead>
               <tbody>

@@ -37,6 +37,51 @@ export default function LineupScreen({
   // Force pitch mode for non-coaches
   const activeMode = appMode === 'coach' ? lineupViewMode : 'pitch';
 
+  // Real Vector Football Pitch Canvas Renderer (Attacking 3rd Turf Theme)
+  const renderRealPitchCanvas = (children) => (
+    <View style={styles.pitchCanvasFrame}>
+      {/* Top Goal Frame */}
+      <View style={styles.pitchGoalTopFrame} />
+
+      {/* Main Pitch Turf Body */}
+      <View style={styles.pitchTurfBody}>
+        {/* Pitch Boundary Lines */}
+        <View style={styles.pitchOuterBoundary} />
+
+        {/* Halfway Line & Center Circle */}
+        <View style={styles.pitchHalfwayLine} />
+        <View style={styles.pitchCenterCircle} />
+        <View style={styles.pitchCenterSpot} />
+
+        {/* Top Penalty Box & 6-Yard Goal Box */}
+        <View style={styles.pitchPenaltyBoxTop} />
+        <View style={styles.pitchGoalBoxTop} />
+        <View style={styles.pitchPenaltySpotTop} />
+        <View style={styles.pitchPenaltyArcTop} />
+
+        {/* Bottom Penalty Box & 6-Yard Goal Box */}
+        <View style={styles.pitchPenaltyBoxBottom} />
+        <View style={styles.pitchGoalBoxBottom} />
+        <View style={styles.pitchPenaltySpotBottom} />
+        <View style={styles.pitchPenaltyArcBottom} />
+
+        {/* Corner Arcs */}
+        <View style={[styles.cornerArc, { top: 10, left: 10, borderBottomRightRadius: 10 }]} />
+        <View style={[styles.cornerArc, { top: 10, right: 10, borderBottomLeftRadius: 10 }]} />
+        <View style={[styles.cornerArc, { bottom: 10, left: 10, borderTopRightRadius: 10 }]} />
+        <View style={[styles.cornerArc, { bottom: 10, right: 10, borderTopLeftRadius: 10 }]} />
+
+        {/* Overlay for Player Pins */}
+        <View style={styles.pitchOverlayLayer}>
+          {children}
+        </View>
+      </View>
+
+      {/* Bottom Goal Frame */}
+      <View style={styles.pitchGoalBottomFrame} />
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       {/* HEADER */}
@@ -97,17 +142,14 @@ export default function LineupScreen({
                 : 'Matchday Tactical Pitch Setup'}
             </Text>
 
-            {/* TACTICAL PITCH GRAPHIC CONTAINER */}
-            <View style={styles.pitchGraphicBox}>
-              <View style={styles.pitchCenterCircle} />
-              <View style={styles.pitchHalfLine} />
-
-              {(activeLayout || []).map((node) => {
+            {/* TACTICAL PITCH GRAPHIC CANVAS */}
+            {renderRealPitchCanvas(
+              (activeLayout || []).map((node) => {
                 const topPos = resolveTop(node);
                 const leftPos = resolveLeft(node);
                 return renderPosition ? renderPosition(node.code, node.label, topPos, leftPos) : null;
-              })}
-            </View>
+              })
+            )}
 
             {/* BENCH LIST */}
             <View style={styles.card}>
@@ -155,16 +197,13 @@ export default function LineupScreen({
               </TouchableOpacity>
             </View>
 
-            <View style={styles.pitchGraphicBox}>
-              <View style={styles.pitchCenterCircle} />
-              <View style={styles.pitchHalfLine} />
-
-              {(activeLayout || []).map((node) => {
+            {renderRealPitchCanvas(
+              (activeLayout || []).map((node) => {
                 const topPos = resolveTop(node);
                 const leftPos = resolveLeft(node);
                 return renderDepthPosition ? renderDepthPosition(node.code, node.label, topPos, leftPos) : null;
-              })}
-            </View>
+              })
+            )}
           </>
         )}
       </ScrollView>
@@ -189,18 +228,178 @@ const styles = StyleSheet.create({
   tafeBtnText: { color: '#0B0E14', fontWeight: 'bold', fontSize: 12 },
   content: { padding: 15 },
   instructionText: { color: '#39FF14', fontSize: 12, fontWeight: 'bold', marginBottom: 12 },
-  pitchGraphicBox: {
-    backgroundColor: '#052E16',
-    height: 380,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#39FF14',
-    position: 'relative',
-    marginBottom: 15,
-    paddingHorizontal: 10
+
+  // REAL FOOTBALL PITCH CANVAS STYLES
+  pitchCanvasFrame: {
+    width: '100%',
+    marginVertical: 10,
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  pitchCenterCircle: { position: 'absolute', top: '38%', left: '35%', width: 100, height: 100, borderRadius: 50, borderWidth: 1, borderColor: 'rgba(57, 255, 20, 0.3)' },
-  pitchHalfLine: { position: 'absolute', top: '50%', width: '100%', height: 1, backgroundColor: 'rgba(57, 255, 20, 0.3)' },
+  pitchGoalTopFrame: {
+    width: 60,
+    height: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderBottomLeftRadius: 3,
+    borderBottomRightRadius: 3,
+    marginBottom: 2,
+  },
+  pitchGoalBottomFrame: {
+    width: 60,
+    height: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderTopLeftRadius: 3,
+    borderTopRightRadius: 3,
+    marginTop: 2,
+  },
+  pitchTurfBody: {
+    width: '100%',
+    height: 420,
+    backgroundColor: '#0D2B16', // Rich football pitch turf green
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#1E4D2B',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  pitchOuterBoundary: {
+    position: 'absolute',
+    top: 10,
+    bottom: 10,
+    left: 10,
+    right: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  pitchHalfwayLine: {
+    position: 'absolute',
+    top: '50%',
+    left: 10,
+    right: 10,
+    height: 1.5,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  pitchCenterCircle: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    width: 80,
+    height: 80,
+    marginLeft: -40,
+    marginTop: -40,
+    borderRadius: 40,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  pitchCenterSpot: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    width: 6,
+    height: 6,
+    marginLeft: -3,
+    marginTop: -3,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+  },
+  pitchPenaltyBoxTop: {
+    position: 'absolute',
+    top: 10,
+    left: '22%',
+    right: '22%',
+    height: 60,
+    borderWidth: 1.5,
+    borderTopWidth: 0,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  pitchGoalBoxTop: {
+    position: 'absolute',
+    top: 10,
+    left: '36%',
+    right: '36%',
+    height: 22,
+    borderWidth: 1.5,
+    borderTopWidth: 0,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  pitchPenaltySpotTop: {
+    position: 'absolute',
+    top: 52,
+    left: '50%',
+    width: 4,
+    height: 4,
+    marginLeft: -2,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
+  },
+  pitchPenaltyArcTop: {
+    position: 'absolute',
+    top: 54,
+    left: '40%',
+    width: '20%',
+    height: 20,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderTopWidth: 0,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  pitchPenaltyBoxBottom: {
+    position: 'absolute',
+    bottom: 10,
+    left: '22%',
+    right: '22%',
+    height: 60,
+    borderWidth: 1.5,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  pitchGoalBoxBottom: {
+    position: 'absolute',
+    bottom: 10,
+    left: '36%',
+    right: '36%',
+    height: 22,
+    borderWidth: 1.5,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  pitchPenaltySpotBottom: {
+    position: 'absolute',
+    bottom: 52,
+    left: '50%',
+    width: 4,
+    height: 4,
+    marginLeft: -2,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
+  },
+  pitchPenaltyArcBottom: {
+    position: 'absolute',
+    bottom: 54,
+    left: '40%',
+    width: '20%',
+    height: 20,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  cornerArc: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  pitchOverlayLayer: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+
   card: { backgroundColor: '#1A1F26', borderRadius: 12, padding: 16, marginBottom: 15, borderWidth: 1, borderColor: '#2E3A44' },
   cardTitle: { color: '#39FF14', fontWeight: 'bold', fontSize: 12, letterSpacing: 0.5, marginBottom: 10 },
   benchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
