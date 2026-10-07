@@ -54,6 +54,7 @@ export default function CustomTrainingScreen({
       if (!error && data) {
         const mapped = data.map(item => ({
           id: item.id,
+          slot: 'all', // Custom vault drills available in all slots
           title: `[Vault] ${item.title}`,
           rpe: item.rpe_label || `RPE ${item.rpe_val}`,
           rpeVal: item.rpe_val,
@@ -67,24 +68,29 @@ export default function CustomTrainingScreen({
     }
   };
 
-  // Compile 156 drills from 52-week curriculum
+  // Compile 156 drills from 52-week curriculum with explicit slot tags
   const curriculumDrills = Object.keys(curriculum52Weeks).flatMap(weekNum => {
     const wData = curriculum52Weeks[weekNum];
     return [
-      { id: `w${weekNum}-s1`, title: `Week ${weekNum}: ${wData.theme} (S1)`, rpe: wData.s1.rpe, rpeVal: wData.s1.rpeVal, text: wData.s1.text },
-      { id: `w${weekNum}-s2`, title: `Week ${weekNum}: ${wData.theme} (S2)`, rpe: wData.s2.rpe, rpeVal: wData.s2.rpeVal, text: wData.s2.text },
-      { id: `w${weekNum}-s3`, title: `Week ${weekNum}: ${wData.theme} (S3)`, rpe: wData.s3.rpe, rpeVal: wData.s3.rpeVal, text: wData.s3.text },
+      { id: `w${weekNum}-s1`, slot: 's1', title: `Week ${weekNum}: ${wData.theme} (S1)`, rpe: wData.s1.rpe, rpeVal: wData.s1.rpeVal, text: wData.s1.text },
+      { id: `w${weekNum}-s2`, slot: 's2', title: `Week ${weekNum}: ${wData.theme} (S2)`, rpe: wData.s2.rpe, rpeVal: wData.s2.rpeVal, text: wData.s2.text },
+      { id: `w${weekNum}-s3`, slot: 's3', title: `Week ${weekNum}: ${wData.theme} (S3)`, rpe: wData.s3.rpe, rpeVal: wData.s3.rpeVal, text: wData.s3.text },
     ];
   });
 
-  const allDrills = [...customVaultDrills, ...curriculumDrills];
+  // Filter drills according to active slot (S1 drills for S1 slot, S2 for S2, S3 for S3)
+  const slotFilteredDrills = [...customVaultDrills, ...curriculumDrills].filter(drill => {
+    if (!activePickerSlot) return true;
+    if (drill.slot === 'all') return true; // Keep custom vault drills available everywhere
+    return drill.slot === activePickerSlot;
+  });
 
-  // Group drills by RPE categories (No massive list!)
+  // Group filtered drills by RPE categories
   const groupedDrills = {
-    easy: allDrills.filter(d => d.rpeVal <= 3),
-    moderate: allDrills.filter(d => d.rpeVal >= 4 && d.rpeVal <= 5),
-    challenging: allDrills.filter(d => d.rpeVal >= 6 && d.rpeVal <= 7),
-    hard: allDrills.filter(d => d.rpeVal >= 8)
+    easy: slotFilteredDrills.filter(d => d.rpeVal <= 3),
+    moderate: slotFilteredDrills.filter(d => d.rpeVal >= 4 && d.rpeVal <= 5),
+    challenging: slotFilteredDrills.filter(d => d.rpeVal >= 6 && d.rpeVal <= 7),
+    hard: slotFilteredDrills.filter(d => d.rpeVal >= 8)
   };
 
   const assignDrillToSlot = (drill) => {
@@ -132,6 +138,7 @@ export default function CustomTrainingScreen({
       if (data && data.length > 0) {
         const addedItem = {
           id: data[0].id,
+          slot: 'all',
           title: `[Vault] ${data[0].title}`,
           rpe: rpeLabel,
           rpeVal: data[0].rpe_val,
@@ -166,7 +173,7 @@ export default function CustomTrainingScreen({
         </TouchableOpacity>
       </View>
 
-      {/* 1. BEFORE EVERY SESSION (SCREENSHOT 1 GRAPHIC) */}
+      {/* 1. BEFORE EVERY SESSION */}
       <View style={styles.warmupCard}>
         <Text style={styles.warmupTitle}>BEFORE EVERY SESSION</Text>
         <Text style={styles.warmupSub}>A repeatable 10-minute warm-up to prepare your joints, movement and ball contact.</Text>
@@ -191,14 +198,67 @@ export default function CustomTrainingScreen({
           <Text style={styles.timelineDesc}>Add close ball touches and three progressive runs.</Text>
         </View>
 
-        {/* ONE STRENGTH ROUND */}
-        <View style={styles.strengthBox}>
-          <Text style={styles.strengthHeader}>ONE STRENGTH ROUND</Text>
-          <Text style={styles.strengthBullet}>• 8 split squats per side</Text>
-          <Text style={styles.strengthBullet}>• 10 glute bridges or hip hinges</Text>
-          <Text style={styles.strengthBullet}>• 12 calf raises</Text>
-          <Text style={styles.strengthBullet}>• 20-second side plank per side</Text>
-          <Text style={styles.strengthNote}>Control every repetition. Stop when you still have two good repetitions left.</Text>
+        {/* ONE STRENGTH ROUND (WITH POSTURE TUTORIAL LINKS) */}
+        <View style={{ backgroundColor: '#ffffff', padding: 15, borderRadius: 10, marginTop: 10 }}>
+          <Text style={{ color: '#0B0E14', fontSize: 15, fontWeight: 'bold', marginBottom: 10 }}>
+            ONE STRENGTH ROUND
+          </Text>
+
+          {/* 1. Split Squats */}
+          <View style={styles.exerciseRow}>
+            <Text style={styles.exerciseText}>• 8 split squats per side</Text>
+            <TouchableOpacity
+              style={styles.formBtnPill}
+              onPress={() => openDrillVideo && openDrillVideo('https://youtu.be/hXpGSa5HYqY?si=lMHSiLsWsQtrAZgu')}
+            >
+              <Text style={styles.formBtnPillText}>📹 Form</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 2. Glute Bridges or Hip Hinges */}
+          <View style={styles.exerciseRowMulti}>
+            <Text style={styles.exerciseText}>• 10 glute bridges or hip hinges</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+              <TouchableOpacity
+                style={styles.formBtnPill}
+                onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/voaUxW5QXAI?si=LEExwnGfP6nF6stS')}
+              >
+                <Text style={styles.formBtnPillText}>📹 Glute Bridge</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.formBtnPill}
+                onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/ndw0uUc2UUk?si=RQqQS5eRMohIbiDl')}
+              >
+                <Text style={styles.formBtnPillText}>📹 Hip Hinge</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* 3. Calf Raises */}
+          <View style={styles.exerciseRow}>
+            <Text style={styles.exerciseText}>• 12 calf raises</Text>
+            <TouchableOpacity
+              style={styles.formBtnPill}
+              onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/haHcBAd637E?si=lOR9t3siYwTkRI_g')}
+            >
+              <Text style={styles.formBtnPillText}>📹 Form</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 4. Side Plank */}
+          <View style={styles.exerciseRow}>
+            <Text style={styles.exerciseText}>• 20-second side plank per side</Text>
+            <TouchableOpacity
+              style={styles.formBtnPill}
+              onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/BtM0a9x1F5o?si=6y0esyL3X2htSplP')}
+            >
+              <Text style={styles.formBtnPillText}>📹 Form</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={{ color: '#64748b', fontSize: 12, lineHeight: 16, marginTop: 10 }}>
+            Control every repetition. Stop when you still have two good repetitions left.
+          </Text>
         </View>
       </View>
 
@@ -244,14 +304,16 @@ export default function CustomTrainingScreen({
 
       <View style={{ height: 30 }} />
 
-      {/* RPE GROUPED DRILL PICKER MODAL */}
+      {/* RPE GROUPED DRILL PICKER MODAL (SLOT SPECIFIC) */}
       <Modal visible={!!activePickerSlot} transparent={true} animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { maxHeight: '85%' }]}>
             <Text style={styles.modalTitle}>
-              Select Drill for {activePickerSlot === 's1' ? 'Session 1 (S1)' : activePickerSlot === 's2' ? 'Session 2 (S2)' : 'Session 3 (S3)'}
+              Select {activePickerSlot ? activePickerSlot.toUpperCase() : ''} Drill
             </Text>
-            <Text style={styles.modalSub}>All drills are grouped by Exertion Level (RPE):</Text>
+            <Text style={styles.modalSub}>
+              Showing only {activePickerSlot ? activePickerSlot.toUpperCase() : ''} drills grouped by Exertion Level (RPE):
+            </Text>
 
             <ScrollView style={{ width: '100%' }}>
               {/* GROUP 1: RPE 2-3 EASY */}
@@ -263,12 +325,18 @@ export default function CustomTrainingScreen({
                 <Text style={{ color: '#22c55e', fontWeight: 'bold' }}>{groupedDrills.easy.length} Drills {expandedRpeSection === 'easy' ? '▲' : '▼'}</Text>
               </TouchableOpacity>
 
-              {expandedRpeSection === 'easy' && groupedDrills.easy.map(item => (
-                <TouchableOpacity key={item.id} style={styles.drillPickerRow} onPress={() => assignDrillToSlot(item)}>
-                  <Text style={styles.pickerDrillTitle}>{item.title}</Text>
-                  <Text style={styles.pickerDrillText}>{item.text}</Text>
-                </TouchableOpacity>
-              ))}
+              {expandedRpeSection === 'easy' && (
+                groupedDrills.easy.length > 0 ? (
+                  groupedDrills.easy.map(item => (
+                    <TouchableOpacity key={item.id} style={styles.drillPickerRow} onPress={() => assignDrillToSlot(item)}>
+                      <Text style={styles.pickerDrillTitle}>{item.title}</Text>
+                      <Text style={styles.pickerDrillText}>{item.text}</Text>
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <Text style={styles.emptyGroupText}>No {activePickerSlot?.toUpperCase()} drills in this RPE level.</Text>
+                )
+              )}
 
               {/* GROUP 2: RPE 4-5 LIGHT / MODERATE */}
               <TouchableOpacity
@@ -279,12 +347,18 @@ export default function CustomTrainingScreen({
                 <Text style={{ color: '#3b82f6', fontWeight: 'bold' }}>{groupedDrills.moderate.length} Drills {expandedRpeSection === 'moderate' ? '▲' : '▼'}</Text>
               </TouchableOpacity>
 
-              {expandedRpeSection === 'moderate' && groupedDrills.moderate.map(item => (
-                <TouchableOpacity key={item.id} style={styles.drillPickerRow} onPress={() => assignDrillToSlot(item)}>
-                  <Text style={styles.pickerDrillTitle}>{item.title}</Text>
-                  <Text style={styles.pickerDrillText}>{item.text}</Text>
-                </TouchableOpacity>
-              ))}
+              {expandedRpeSection === 'moderate' && (
+                groupedDrills.moderate.length > 0 ? (
+                  groupedDrills.moderate.map(item => (
+                    <TouchableOpacity key={item.id} style={styles.drillPickerRow} onPress={() => assignDrillToSlot(item)}>
+                      <Text style={styles.pickerDrillTitle}>{item.title}</Text>
+                      <Text style={styles.pickerDrillText}>{item.text}</Text>
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <Text style={styles.emptyGroupText}>No {activePickerSlot?.toUpperCase()} drills in this RPE level.</Text>
+                )
+              )}
 
               {/* GROUP 3: RPE 6-7 CHALLENGING */}
               <TouchableOpacity
@@ -295,12 +369,18 @@ export default function CustomTrainingScreen({
                 <Text style={{ color: '#eab308', fontWeight: 'bold' }}>{groupedDrills.challenging.length} Drills {expandedRpeSection === 'challenging' ? '▲' : '▼'}</Text>
               </TouchableOpacity>
 
-              {expandedRpeSection === 'challenging' && groupedDrills.challenging.map(item => (
-                <TouchableOpacity key={item.id} style={styles.drillPickerRow} onPress={() => assignDrillToSlot(item)}>
-                  <Text style={styles.pickerDrillTitle}>{item.title}</Text>
-                  <Text style={styles.pickerDrillText}>{item.text}</Text>
-                </TouchableOpacity>
-              ))}
+              {expandedRpeSection === 'challenging' && (
+                groupedDrills.challenging.length > 0 ? (
+                  groupedDrills.challenging.map(item => (
+                    <TouchableOpacity key={item.id} style={styles.drillPickerRow} onPress={() => assignDrillToSlot(item)}>
+                      <Text style={styles.pickerDrillTitle}>{item.title}</Text>
+                      <Text style={styles.pickerDrillText}>{item.text}</Text>
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <Text style={styles.emptyGroupText}>No {activePickerSlot?.toUpperCase()} drills in this RPE level.</Text>
+                )
+              )}
 
               {/* GROUP 4: RPE 8+ HARD WORK */}
               <TouchableOpacity
@@ -311,12 +391,18 @@ export default function CustomTrainingScreen({
                 <Text style={{ color: '#ef4444', fontWeight: 'bold' }}>{groupedDrills.hard.length} Drills {expandedRpeSection === 'hard' ? '▲' : '▼'}</Text>
               </TouchableOpacity>
 
-              {expandedRpeSection === 'hard' && groupedDrills.hard.map(item => (
-                <TouchableOpacity key={item.id} style={styles.drillPickerRow} onPress={() => assignDrillToSlot(item)}>
-                  <Text style={styles.pickerDrillTitle}>{item.title}</Text>
-                  <Text style={styles.pickerDrillText}>{item.text}</Text>
-                </TouchableOpacity>
-              ))}
+              {expandedRpeSection === 'hard' && (
+                groupedDrills.hard.length > 0 ? (
+                  groupedDrills.hard.map(item => (
+                    <TouchableOpacity key={item.id} style={styles.drillPickerRow} onPress={() => assignDrillToSlot(item)}>
+                      <Text style={styles.pickerDrillTitle}>{item.title}</Text>
+                      <Text style={styles.pickerDrillText}>{item.text}</Text>
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <Text style={styles.emptyGroupText}>No {activePickerSlot?.toUpperCase()} drills in this RPE level.</Text>
+                )
+              )}
             </ScrollView>
 
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setActivePickerSlot(null)}>
@@ -410,10 +496,37 @@ const styles = StyleSheet.create({
   timeCircleText: { color: '#0B0E14', fontWeight: 'bold', fontSize: 10 },
   timelineDesc: { color: '#ffffff', fontSize: 12, flex: 1 },
 
-  strengthBox: { backgroundColor: '#ffffff', padding: 12, borderRadius: 8, marginTop: 8 },
-  strengthHeader: { color: '#0B0E14', fontWeight: 'bold', fontSize: 13, marginBottom: 6 },
-  strengthBullet: { color: '#0B0E14', fontSize: 12, marginBottom: 3 },
-  strengthNote: { color: '#64748b', fontSize: 10, fontWeight: 'bold', marginTop: 6 },
+  exerciseRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  exerciseRowMulti: {
+    flexDirection: 'column',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  exerciseText: {
+    color: '#0B0E14',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  formBtnPill: {
+    backgroundColor: '#0B0E14',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  formBtnPillText: {
+    color: '#39FF14',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
 
   sectionTitle: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 8 },
   card: { backgroundColor: '#1A1F26', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#2E3A44', marginBottom: 15 },
@@ -435,6 +548,7 @@ const styles = StyleSheet.create({
   drillPickerRow: { backgroundColor: '#0B0E14', padding: 10, borderRadius: 6, marginTop: 6, borderWidth: 1, borderColor: '#2E3A44' },
   pickerDrillTitle: { color: '#39FF14', fontWeight: 'bold', fontSize: 12 },
   pickerDrillText: { color: '#cbd5e1', fontSize: 11, marginTop: 2 },
+  emptyGroupText: { color: '#64748b', fontSize: 11, fontStyle: 'italic', paddingVertical: 8, paddingHorizontal: 12 },
 
   inputLabel: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
   input: { backgroundColor: '#0B0E14', color: '#ffffff', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44', marginBottom: 12 },

@@ -266,11 +266,11 @@ export default function App() {
   const totalTeamApps = (teamSheet || []).reduce((sum, p) => sum + (p.apps || 0), 0);
   const isTafeDisabled = totalTeamApps === 0;
 
-  // Automatically lock screen to Landscape when video opens, and back to Portrait when closed
+  // Unlock orientation when video opens so it can freely rotate between portrait and landscape
   useEffect(() => {
     async function changeOrientation() {
       if (activeVideoId) {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+        await ScreenOrientation.unlockAsync();
       } else {
         await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
       }
@@ -581,27 +581,43 @@ export default function App() {
   }
 
   useEffect(() => {
+    let initialMount = true;
     fetchCloudData();
 
+    // Initial session check on app boot
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session?.user) {
-        fetchUserProfile(session.user.id);
+        fetchUserProfile(session.user.id).finally(() => {
+          initialMount = false;
+        });
       } else {
         setLoading(false);
+        initialMount = false;
       }
     }).catch((err) => {
       console.error("Session fetch error:", err);
       setLoading(false);
+      initialMount = false;
     });
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session?.user) {
-        fetchUserProfile(session.user.id);
-      } else {
-        setProfile(null);
-        setLoading(false);
+    // Auth listener that ignores background token refreshes
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      // 1. Ignore background token refreshes so UI doesn't kick back to loading screen
+      if (event === 'TOKEN_REFRESHED') {
+        setSession(session);
+        return; 
+      }
+
+      // 2. Only run profile fetches/loading screens on explicit sign in/out
+      if (!initialMount) {
+        setSession(session);
+        if (session?.user) {
+          fetchUserProfile(session.user.id);
+        } else {
+          setProfile(null);
+          setLoading(false);
+        }
       }
     });
 

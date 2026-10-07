@@ -128,7 +128,7 @@ export default function TrainingScreen({
         <Text style={styles.headerTitle}>Training Center</Text>
       </View>
 
-      {/* 1. TRAINING ATTENDANCE REGISTER (MOVED TO TOP) */}
+      {/* 1. TRAINING ATTENDANCE REGISTER */}
       <View style={[styles.card, { borderColor: '#39FF14', marginBottom: 15 }]}>
         <TouchableOpacity
           style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
@@ -175,7 +175,119 @@ export default function TrainingScreen({
         </View>
       </View>
 
-      {/* 2. RECORD THESE TESTS (SCREENSHOT 2 GRAPHIC) */}
+      {/* BEFORE EVERY SESSION */}
+      <View style={styles.card}>
+        <Text style={{ color: '#39FF14', fontSize: 16, fontWeight: 'bold', marginBottom: 6 }}>
+          BEFORE EVERY SESSION
+        </Text>
+        <Text style={{ color: '#cbd5e1', fontSize: 13, lineHeight: 18, marginBottom: 15 }}>
+          A repeatable 10-minute warm-up to prepare your joints, movement and ball contact.
+        </Text>
+
+        {/* Dynamic Warm-Up Minute Timeline Rows */}
+        <View style={{ gap: 10, marginBottom: 15 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={styles.minPill}>
+              <Text style={styles.minPillText}>MIN 1-2</Text>
+            </View>
+            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>
+              Jog, skip, shuffle and move backward.
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={styles.minPill}>
+              <Text style={styles.minPillText}>MIN 3-4</Text>
+            </View>
+            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>
+              Complete ankle rocks, hip openings and controlled leg swings.
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={styles.minPill}>
+              <Text style={styles.minPillText}>MIN 5-7</Text>
+            </View>
+            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>
+              Complete calf raises, split squats and glute bridges.
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={styles.minPill}>
+              <Text style={styles.minPillText}>MIN 8-10</Text>
+            </View>
+            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>
+              Add close ball touches and three progressive runs.
+            </Text>
+          </View>
+        </View>
+
+        {/* ONE STRENGTH ROUND (WITH POSTURE TUTORIAL LINKS) */}
+        <View style={{ backgroundColor: '#ffffff', padding: 15, borderRadius: 10 }}>
+          <Text style={{ color: '#0B0E14', fontSize: 15, fontWeight: 'bold', marginBottom: 10 }}>
+            ONE STRENGTH ROUND
+          </Text>
+
+          {/* 1. Split Squats */}
+          <View style={styles.exerciseRow}>
+            <Text style={styles.exerciseText}>• 8 split squats per side</Text>
+            <TouchableOpacity
+              style={styles.formBtnPill}
+              onPress={() => openDrillVideo && openDrillVideo('https://youtu.be/hXpGSa5HYqY?si=lMHSiLsWsQtrAZgu')}
+            >
+              <Text style={styles.formBtnPillText}>📹 Form</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 2. Glute Bridges or Hip Hinges */}
+          <View style={styles.exerciseRowMulti}>
+            <Text style={styles.exerciseText}>• 10 glute bridges or hip hinges</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+              <TouchableOpacity
+                style={styles.formBtnPill}
+                onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/voaUxW5QXAI?si=LEExwnGfP6nF6stS')}
+              >
+                <Text style={styles.formBtnPillText}>📹 Glute Bridge</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.formBtnPill}
+                onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/ndw0uUc2UUk?si=RQqQS5eRMohIbiDl')}
+              >
+                <Text style={styles.formBtnPillText}>📹 Hip Hinge</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* 3. Calf Raises */}
+          <View style={styles.exerciseRow}>
+            <Text style={styles.exerciseText}>• 12 calf raises</Text>
+            <TouchableOpacity
+              style={styles.formBtnPill}
+              onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/haHcBAd637E?si=lOR9t3siYwTkRI_g')}
+            >
+              <Text style={styles.formBtnPillText}>📹 Form</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 4. Side Plank */}
+          <View style={styles.exerciseRow}>
+            <Text style={styles.exerciseText}>• 20-second side plank per side</Text>
+            <TouchableOpacity
+              style={styles.formBtnPill}
+              onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/BtM0a9x1F5o?si=6y0esyL3X2htSplP')}
+            >
+              <Text style={styles.formBtnPillText}>📹 Form</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={{ color: '#64748b', fontSize: 12, lineHeight: 16, marginTop: 10 }}>
+            Control every repetition. Stop when you still have two good repetitions left.
+          </Text>
+        </View>
+      </View>
+
+      {/* 2. RECORD THESE TESTS */}
       <View style={styles.testsCard}>
         <Text style={styles.testsTitle}>RECORD THESE TESTS</Text>
         <View style={styles.testGrid}>
@@ -363,6 +475,52 @@ const styles = StyleSheet.create({
   rpeBadgeBox: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   rpeDot: { width: 8, height: 8, borderRadius: 4 },
   rpeLegendText: { color: '#94a3b8', fontSize: 10, fontWeight: 'bold' },
+
+  minPill: {
+    backgroundColor: '#39FF14',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  minPillText: {
+    color: '#0B0E14',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+
+  exerciseRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  exerciseRowMulti: {
+    flexDirection: 'column',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  exerciseText: {
+    color: '#0B0E14',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  formBtnPill: {
+    backgroundColor: '#0B0E14',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  formBtnPillText: {
+    color: '#39FF14',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
 
   testsCard: { backgroundColor: '#1A1F26', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#2E3A44', marginBottom: 15 },
   testsTitle: { color: '#39FF14', fontSize: 16, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
