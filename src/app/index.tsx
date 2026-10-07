@@ -1,3 +1,4 @@
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -23,7 +24,7 @@ import { supabase } from '../supabase';
 // Constants & Utilities
 import { ageGroupOptions, profilePositions, profileSecondaryPositions } from '../constants/profileData';
 import { formationCategories, formationLayouts, gameStateTactics } from '../constants/tactics';
-import { seedFullTeamRoster, seedSeasonStats } from '../utils/devSeeder';
+import { seedFullTeamRoster, seedSeasonStats, testOfflineQueueFlow } from '../utils/devSeeder';
 import { enqueueOfflineEvent, flushOfflineQueue, getOfflineQueue } from '../utils/offlineQueue';
 import { generateSeasonPdfReport } from '../utils/pdfGenerator';
 import {
@@ -221,7 +222,7 @@ export default function App() {
 
   const [isRsvpListExpanded, setIsRsvpListExpanded] = useState(false);
 
-  // DYNAMIC TEAM & AGE GROUP RESOLUTION
+  // Dynamic Team & Age Group Resolution
   const activeTeamObj = myTeams.find(t => t.id === activeTeamId) || {};
   const effectiveAgeGroup = activeTeamObj?.age_group || teamAgeGroup || 'U16';
   const isAdultTeam = String(effectiveAgeGroup).toLowerCase().includes('adult');
@@ -265,6 +266,17 @@ export default function App() {
   const totalTeamApps = (teamSheet || []).reduce((sum, p) => sum + (p.apps || 0), 0);
   const isTafeDisabled = totalTeamApps === 0;
 
+  // Automatically lock screen to Landscape when video opens, and back to Portrait when closed
+  useEffect(() => {
+    async function changeOrientation() {
+      if (activeVideoId) {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+      } else {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      }
+    }
+    changeOrientation();
+  }, [activeVideoId]);
   const openDrillVideo = (url) => {
     const videoId = getYouTubeId(url);
     if (videoId) {
@@ -273,7 +285,6 @@ export default function App() {
       Alert.alert("Video Error", "Invalid or missing video URL.");
     }
   };
-
   const fetchCloudData = async () => {
     try {
       const { data: drillsData } = await supabase.from('training_drills').select('*').order('id', { ascending: true });
@@ -469,98 +480,134 @@ export default function App() {
     setLoading(true);
     const startTime = Date.now();
 
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (data) setProfile(data);
-    
-    const { data: teamsData } = await supabase.from('teams').select('*').or(`created_by.eq.${userId}`);
-    let resolvedTeamId = activeTeamId;
-    
-    if (teamsData && teamsData.length > 0) {
-      setMyTeams(teamsData);
-      if (!resolvedTeamId || !teamsData.find(t => t.id === resolvedTeamId)) {
-        resolvedTeamId = teamsData[0].id;
-        setActiveTeamId(resolvedTeamId);
-        if (teamsData[0].age_group) setTeamAgeGroup(teamsData[0].age_group);
-      }
-    } else {
-      setMyTeams([]);
-      setActiveTeamId(null);
-      resolvedTeamId = null;
-      await supabase.from('profiles').update({ role_configured: false }).eq('id', userId);
-      setProfile(prev => prev ? { ...prev, role_configured: false } : null);
-      setOnboardingStep('choose_path');
-    }
-    
-    if (resolvedTeamId) {
-      await fetchTeamData(userId, resolvedTeamId);
-    }
-    
-    const elapsedTime = Date.now() - startTime;
-    const remainingDelay = Math.max(0, 3500 - elapsedTime);
+    try {
+      // 1. Fetch Profile
+      const { data: profileData, error: profileErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-    setTimeout(() => {
-      setLoading(false);
-    }, remainingDelay);
+      if (profileErr) console.warn('⚠️ Profile Fetch Warning:', profileErr.message);
+
+      if (profileData) {
+        setProfile(profileData);
+        // Force Coach Mode if role is coach or assistant
+        if (profileData.role === 'coach' || profileData.role === 'assistant') {
+          setAppMode('coach');
+          setCurrentTab('coachHub');
+        }
+      }
+
+      // 2. Fetch Teams
+      const { data: teamsData, error: teamsErr } = await supabase
+        .from('teams')
+        .select('*')
+        .or(`created_by.eq.${userId}`);
+
+      if (teamsErr) console.warn('⚠️ Teams Fetch Warning:', teamsErr.message);
+
+      if (teamsData && teamsData.length > 0) {
+        setMyTeams(teamsData);
+        const resolvedTeamId = activeTeamId && teamsData.some(t => t.id === activeTeamId)
+          ? activeTeamId
+          : teamsData[0].id;
+
+        setActiveTeamId(resolvedTeamId);
+        const activeTeam = teamsData.find(t => t.id === resolvedTeamId);
+        if (activeTeam?.age_group) setTeamAgeGroup(activeTeam.age_group);
+      } else {
+        setMyTeams([]);
+      }
+    } catch (err) {
+      console.error("❌ Critical Error in fetchUserProfile:", err);
+    } finally {
+      const elapsedTime = Date.now() - startTime;
+      const remainingDelay = Math.max(0, 1000 - elapsedTime);
+
+      setTimeout(() => {
+        setLoading(false);
+      }, remainingDelay);
+    }
   }
 
   async function handleAuth() {
     Keyboard.dismiss();
     setAuthMessage({ text: '', type: '' });
-    if (!email || !password) { setAuthMessage({ text: 'Please enter email and password.', type: 'error' }); return; }
+
+    if (!email || !password) {
+      setAuthMessage({ text: 'Please enter email and password.', type: 'error' });
+      return;
+    }
 
     setLoading(true);
 
-    if (authMode === 'signup') {
-      const { data, error } = await supabase.auth.signUp({ email, password });
-      if (error) { 
-        setAuthMessage({ text: error.message, type: 'error' }); 
-        setLoading(false);
-      } 
-      else if (data.user) {
-        await supabase.from('profiles').upsert([{ id: data.user.id, email, full_name: fullName, role: 'coach', role_configured: true }]);
-        if (!data.session) {
-          setAuthMessage({ text: 'Account created! Switch to Sign In.', type: 'success' });
+    try {
+      if (authMode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) {
+          setAuthMessage({ text: error.message, type: 'error' });
           setLoading(false);
+        } else if (data.user) {
+          await supabase.from('profiles').upsert([{
+            id: data.user.id,
+            email,
+            full_name: fullName,
+            role: 'coach',
+            role_configured: true
+          }]);
+
+          if (!data.session) {
+            setAuthMessage({ text: 'Account created! Switch to Sign In.', type: 'success' });
+            setLoading(false);
+          } else {
+            await fetchUserProfile(data.user.id);
+          }
         }
-        else fetchUserProfile(data.user.id);
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          setAuthMessage({ text: error.message, type: 'error' });
+          setLoading(false);
+        } else if (data.user) {
+          await fetchUserProfile(data.user.id);
+        }
       }
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setAuthMessage({ text: error.message, type: 'error' });
-        setLoading(false);
-      }
+    } catch (err) {
+      console.error("❌ Auth Error:", err);
+      setAuthMessage({ text: err.message || 'Authentication error occurred.', type: 'error' });
+      setLoading(false);
     }
   }
 
   useEffect(() => {
     fetchCloudData();
-    const startTime = Date.now();
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) {
+      if (session?.user) {
         fetchUserProfile(session.user.id);
       } else {
-        const elapsedTime = Date.now() - startTime;
-        const remainingDelay = Math.max(0, 3500 - elapsedTime);
-        setTimeout(() => {
-          setLoading(false);
-        }, remainingDelay);
+        setLoading(false);
       }
+    }).catch((err) => {
+      console.error("Session fetch error:", err);
+      setLoading(false);
     });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) {
+      if (session?.user) {
         fetchUserProfile(session.user.id);
-      } else { 
-        setProfile(null); 
-        setLoading(false); 
+      } else {
+        setProfile(null);
+        setLoading(false);
       }
     });
 
-    return () => { authListener?.subscription?.unsubscribe(); };
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -628,104 +675,6 @@ export default function App() {
     }
     return () => clearInterval(interval);
   }, [matchPhase, matchStartTimestamp, accumulatedSeconds]);
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.splashContainer}>
-        <View style={styles.splashCenterBox}>
-          <Image 
-            source={{ uri: 'https://jnogngcywfgitzryooig.supabase.co/storage/v1/object/public/app-assets/Tactical%20Engine%20Logo.png' }} 
-            style={styles.splashLogoImage}
-            resizeMode="contain"
-          />
-          <ActivityIndicator size="large" color="#39FF14" style={{ marginTop: 25 }} />
-          <Text style={styles.splashLoadingText}>
-            Initializing Command Center...
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (!session) {
-    return (
-      <TouchableOpacity activeOpacity={1} onPress={() => Keyboard.dismiss()} style={{ flex: 1 }}>
-        <SafeAreaView style={styles.authContainer}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, width: '100%' }}>
-            <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
-              <View style={styles.authBox}>
-                <View style={{ alignItems: 'center', marginBottom: 15 }}>
-                  <Image 
-                    source={{ uri: 'https://jnogngcywfgitzryooig.supabase.co/storage/v1/object/public/app-assets/Tactical%20Engine%20Logo.png' }} 
-                    style={{ width: 200, height: 75, resizeMode: 'contain' }} 
-                  />
-                </View>
-                <Text style={styles.authHeaderSub}>TACTICAL ENGINE</Text>
-                <Text style={styles.authHeaderTitle}>{authMode === 'signin' ? 'Account Sign In' : 'Create Account'}</Text>
-                {authMessage?.text ? <Text style={authMessage.type === 'error' ? styles.errorText : styles.successText}>{authMessage.text}</Text> : null}
-                {authMode === 'signup' && <TextInput style={styles.input} placeholder="Full Name" placeholderTextColor="#64748b" value={fullName} onChangeText={setFullName} />}
-                <TextInput style={styles.input} placeholder="Email" placeholderTextColor="#64748b" value={email} onChangeText={setEmail} autoCapitalize="none" />
-                <TextInput style={styles.input} placeholder="Password" placeholderTextColor="#64748b" value={password} onChangeText={setPassword} secureTextEntry />
-                <TouchableOpacity style={styles.primaryAuthBtn} onPress={handleAuth}><Text style={styles.primaryAuthBtnText}>{authMode === 'signin' ? 'Sign In' : 'Register Account'}</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => { setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); setAuthMessage({ text: '', type: '' }); }} style={{ marginTop: 15 }}><Text style={styles.switchAuthText}>{authMode === 'signin' ? "Don't have an account? Register" : "Already have an account? Sign In"}</Text></TouchableOpacity>
-              </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </TouchableOpacity>
-    );
-  }
-
-  if (!profile || profile.role_configured === false) {
-    return (
-      <TouchableOpacity activeOpacity={1} onPress={() => Keyboard.dismiss()} style={{ flex: 1 }}>
-        <SafeAreaView style={styles.authContainer}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, width: '100%' }}>
-            <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
-              <View style={styles.authBox}>
-                {onboardingStep === 'choose_path' && (
-                  <>
-                    <Text style={styles.authHeaderSub}>WELCOME TO THE CLUB</Text>
-                    <Text style={styles.authHeaderTitle}>How are you getting started?</Text>
-                    <TouchableOpacity style={styles.wizardOptionBtn} onPress={() => setOnboardingStep('create_team')}><Text style={styles.wizardOptionTitle}>⚽ I am a Head Coach / Admin</Text><Text style={styles.wizardOptionSub}>Create a new team, build the Team Sheet, and invite assistant coaches & parents.</Text></TouchableOpacity>
-                    <TouchableOpacity style={[styles.wizardOptionBtn, { borderColor: '#3b82f6' }]} onPress={() => setOnboardingStep('link_child')}><Text style={[styles.wizardOptionTitle, { color: '#3b82f6' }]}>👨‍👩‍👦 Staff / Parent / Guardian / Fan</Text><Text style={styles.wizardOptionSub}>Enter the invite code sent by your coach or player to join as Staff or Parent.</Text></TouchableOpacity>
-                  </>
-                )}
-                {onboardingStep === 'create_team' && (
-                  <>
-                    <Text style={styles.authHeaderSub}>COACH SETUP</Text>
-                    <Text style={styles.authHeaderTitle}>Create Your Team</Text>
-                    {authMessage?.text ? <Text style={styles.errorText}>{authMessage.text}</Text> : null}
-                    <TextInput style={styles.input} placeholder="Team Name (e.g. Marlow Utd)" placeholderTextColor="#64748b" value={teamName} onChangeText={setTeamName} />
-                    
-                    <Text style={styles.inputLabel}>Select Age Group:</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
-                      {ageGroupOptions.map(age => (
-                        <TouchableOpacity key={age} style={[styles.fmtBtn, teamAgeGroup === age && styles.fmtBtnActive]} onPress={() => setTeamAgeGroup(age)}>
-                          <Text style={[styles.fmtBtnText, teamAgeGroup === age && styles.fmtBtnTextActive]}>{age}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-
-                    <TouchableOpacity style={styles.primaryAuthBtn} onPress={createTeamFlow}><Text style={styles.primaryAuthBtnText}>Launch Command Center</Text></TouchableOpacity>
-                  </>
-                )}
-                {onboardingStep === 'link_child' && (
-                  <>
-                    <Text style={styles.authHeaderSub}>JOIN TEAM</Text>
-                    <Text style={styles.authHeaderTitle}>Enter Invite Code</Text>
-                    {authMessage?.text ? <Text style={styles.errorText}>{authMessage.text}</Text> : null}
-                    <TextInput style={[styles.input, { letterSpacing: 3, textAlign: 'center', fontSize: 20, marginTop: 15 }]} placeholder="LEW-942 or STAF-123" placeholderTextColor="#64748b" value={familyCodeInput} onChangeText={setFamilyCodeInput} autoCapitalize="characters" />
-                    <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#3b82f6' }]} onPress={linkChildFlow}><Text style={styles.primaryAuthBtnText}>Join Team Hub</Text></TouchableOpacity>
-                  </>
-                )}
-              </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </TouchableOpacity>
-    );
-  }
 
   const formatTime = (totalSeconds) => {
     const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
@@ -1147,7 +1096,6 @@ export default function App() {
     }
     await broadcastEvent('⚽', msg, pendingEvent?.minute);
   };
-
   const initCardFlow = () => {
     const min = `${Math.floor(displaySeconds / 60)}'`;
     setPendingEvent({ minute: min, type: 'card' });
@@ -1859,7 +1807,103 @@ export default function App() {
       </View>
     );
   };
+  // --- MISSING LOADING & LOGIN SCREENS ---
+  const SUPABASE_LOGO_URL = 'https://jnogngcywfgitzryooig.supabase.co/storage/v1/object/public/app-assets/Tactical%20Engine%20Logo.png';
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.splashContainer}>
+        <View style={styles.splashCenterBox}>
+          <Image
+            source={{ uri: SUPABASE_LOGO_URL }}
+            style={styles.splashLogoImage}
+            resizeMode="contain"
+          />
+          <ActivityIndicator size="large" color="#39FF14" style={{ marginTop: 20 }} />
+          <Text style={styles.splashLoadingText}>TACTICAL ENGINE LOADING...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!session) {
+    return (
+      <SafeAreaView style={styles.authContainer}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
+            <View style={styles.authBox}>
+              <Image
+                source={{ uri: SUPABASE_LOGO_URL }}
+                style={{ width: '100%', height: 110, marginBottom: 15 }}
+                resizeMode="contain"
+              />
+              <Text style={styles.authHeaderSub}>Tactical Engine</Text>
+              <Text style={styles.authHeaderTitle}>{authMode === 'signin' ? 'Coach & Player Login' : 'Create Account'}</Text>
+              
+              {authMessage.text ? (
+                <Text style={authMessage.type === 'error' ? styles.errorText : styles.successText}>
+                  {authMessage.text}
+                </Text>
+              ) : null}
+
+              {authMode === 'signup' && (
+                <>
+                  <Text style={styles.inputLabel}>Full Name</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. John Doe"
+                    placeholderTextColor="#64748b"
+                    value={fullName}
+                    onChangeText={setFullName}
+                  />
+                </>
+              )}
+
+              <Text style={styles.inputLabel}>Email Address</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="coach@example.com"
+                placeholderTextColor="#64748b"
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+
+              <Text style={styles.inputLabel}>Password</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="••••••••"
+                placeholderTextColor="#64748b"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+              />
+
+              <TouchableOpacity style={styles.primaryAuthBtn} onPress={handleAuth}>
+                <Text style={styles.primaryAuthBtnText}>
+                  {authMode === 'signin' ? 'Sign In' : 'Create Account'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={{ marginTop: 20 }} 
+                onPress={() => {
+                  setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
+                  setAuthMessage({ text: '', type: '' });
+                }}
+              >
+                <Text style={styles.switchAuthText}>
+                  {authMode === 'signin' ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+  // ---------------------------------------
   return (
     <SafeAreaView style={styles.container}>
       
@@ -2066,6 +2110,7 @@ export default function App() {
         {/* TRAINING CENTER */}
         {currentTab === 'training' && (
           <TrainingScreen
+            activeTeamId={activeTeamId}
             isTrainingRegisterExpanded={isTrainingRegisterExpanded}
             setIsTrainingRegisterExpanded={setIsTrainingRegisterExpanded}
             teamSheet={teamSheet}
@@ -2082,6 +2127,7 @@ export default function App() {
         {/* CUSTOM TRAINING PLANNER */}
         {currentTab === 'customTraining' && (
           <CustomTrainingScreen
+            activeTeamId={activeTeamId}
             setDrillSelectorMode={setDrillSelectorMode}
             selectedWarmup={selectedWarmup}
             selectedDrill1={selectedDrill1}
@@ -2145,7 +2191,6 @@ export default function App() {
           </>
         )}
       </View>
-
       {/* MODALS & OVERLAYS */}
       <Modal visible={isSeasonArchiveOpen} transparent={true} animationType="slide">
         <View style={styles.modalOverlayFull}>
@@ -2298,7 +2343,12 @@ export default function App() {
       </Modal>
 
       {/* YOUTUBE PLAYER MODAL */}
-      <Modal visible={!!activeVideoId} transparent={true} animationType="fade">
+      <Modal 
+        visible={!!activeVideoId} 
+        transparent={true} 
+        animationType="fade"
+        supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
+      >
         <View style={styles.modalOverlayFull}>
           <View style={[styles.modalBoxFull, { padding: 10, backgroundColor: '#1A1F26' }]}>
             <Text style={styles.modalTitle}>📹 Tactical Video Analysis</Text>
@@ -2307,9 +2357,9 @@ export default function App() {
                 height={220}
                 play={true}
                 videoId={activeVideoId}
-                onChangeState={(state) => {
-                  if (state === "ended") setActiveVideoId(null);
-                }}
+                onChangeState={(event: string) => {
+            if (event === "ended") setActiveVideoId(null);
+          }}
               />
             )}
             <TouchableOpacity style={[styles.cancelBtn, { marginTop: 15 }]} onPress={() => setActiveVideoId(null)}>
@@ -2762,7 +2812,7 @@ export default function App() {
             <ScrollView style={{ flex: 1, marginTop: 10 }} keyboardShouldPersistTaps="handled">
               {appMode === 'coach' && (
                 <>
-                  {/* DEV SEEDING TOOLS */}
+                  {/* DEV SEEDING & OFFLINE TEST TOOLS */}
                   {__DEV__ && (
                     <>
                       <TouchableOpacity 
@@ -2797,6 +2847,16 @@ export default function App() {
                         }}
                       >
                         <Text style={[styles.sidebarItemText, { color: '#eab308' }]}>🧪 Dev: Seed Full Season Stats</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.sidebarItem, { borderColor: '#a855f7' }]} 
+                        onPress={() => {
+                          setIsSidebarOpen(false);
+                          testOfflineQueueFlow(activeTeamId);
+                        }}
+                      >
+                        <Text style={[styles.sidebarItemText, { color: '#a855f7' }]}>🧪 Dev: Test Offline Queue & Flush</Text>
                       </TouchableOpacity>
 
                       <View style={{ marginVertical: 8, height: 1, backgroundColor: '#2E3A44' }} />

@@ -1,5 +1,6 @@
 import { Alert } from 'react-native';
 import { supabase } from '../supabase';
+import { enqueueOfflineEvent, flushOfflineQueue, getOfflineQueue } from './offlineQueue';
 import { getPosCategory } from './positionHelpers';
 
 /**
@@ -114,7 +115,6 @@ export const seedSeasonStats = async ({
         onPress: async () => {
           if (setLoading) setLoading(true);
           try {
-            // 1. Update Player Stats
             const playerUpdates = teamSheet.map((p, idx) => {
               const category = getPosCategory(p.position);
               let apps = 22 + (idx % 4);
@@ -184,7 +184,6 @@ export const seedSeasonStats = async ({
                 .eq('id', p.id);
             });
 
-            // 2. Generate 20 Match Records
             const opponents = [
               'Redhill Youth', 'Guildford City', 'Woking Town', 'Farnham Utd',
               'Epsom Eagles', 'Leatherhead FC', 'Staines Town', 'Dorking Wanderers',
@@ -228,6 +227,51 @@ export const seedSeasonStats = async ({
             console.error(err);
             Alert.alert("Error", err.message);
           }
+        }
+      }
+    ]
+  );
+};
+
+/**
+ * Dev Tool: Simulates logging a live match event while offline and manually flushing it.
+ */
+export const testOfflineQueueFlow = async (activeTeamId) => {
+  if (!activeTeamId) {
+    Alert.alert("Error", "Please select an active team first.");
+    return;
+  }
+
+  const mockPayload = {
+    table: 'live_ticker',
+    payload: {
+      team_id: activeTeamId,
+      minute: "45'+2",
+      icon: "⚽",
+      message: "GOAL! (Offline Queue Test Event) ⚽"
+    }
+  };
+
+  await enqueueOfflineEvent(mockPayload);
+  const queueAfterEnqueue = await getOfflineQueue();
+
+  Alert.alert(
+    "🧪 Offline Event Queued",
+    `Event enqueued locally! Current offline queue count: ${queueAfterEnqueue.length}.\n\nWould you like to flush the queue to Supabase now?`,
+    [
+      { text: "Keep Queued", style: "cancel" },
+      {
+        text: "Flush Queue Now",
+        onPress: async () => {
+          const result = await flushOfflineQueue();
+          
+          // Small delay gives iOS time to complete the modal dismiss animation
+          setTimeout(() => {
+            Alert.alert(
+              "⚡ Queue Flushed",
+              `Flushed: ${result.flushedCount} event(s).\nRemaining in local queue: ${result.remainingCount} event(s).`
+            );
+          }, 350);
         }
       }
     ]

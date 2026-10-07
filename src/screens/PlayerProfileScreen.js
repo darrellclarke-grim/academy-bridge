@@ -92,33 +92,63 @@ export default function PlayerProfileScreen({
   const renderQuizExplanation = (explanation) => {
     if (!explanation) return null;
 
-    const parts = explanation.split('\n').map(p => p.trim()).filter(Boolean);
+    // 1. Try splitting by explicit line breaks first
+    let rawBlocks = explanation.split(/\n+/).map(p => p.trim()).filter(Boolean);
+
+    // 2. If single block (no explicit line breaks from Supabase), split by header regex lookahead
+    if (rawBlocks.length <= 1) {
+      rawBlocks = explanation
+        .split(/(?=(?:Why\s+Option\s+[A-C]|Why\s+[A-C]|Option\s+[A-C]|Why\s+it\s+fails|Why\s+this\s+fails|Why\s+this\s+works)[:\s\-\?\.]?)/gi)
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
 
     return (
       <View style={styles.explanationContentBox}>
         <Text style={styles.explanationHeaderTitle}>💡 TACTICAL ANALYSIS BREAKDOWN</Text>
-        {parts.map((part, index) => {
-          const upper = part.toUpperCase();
-          const isOptimalHeader = upper.includes('OPTIMAL') || upper.includes('CORRECT') || upper.includes('BEST CHOICE');
-          const isFailHeader = upper.includes('FAIL') || upper.includes('INCORRECT') || upper.includes('RISK') || upper.includes('WHY');
-          const isOptionHeader = upper.startsWith('OPTION') || isOptimalHeader || isFailHeader;
+        {rawBlocks.map((block, index) => {
+          // Detect header patterns like "Why Option A is optimal", "Why Option B fails", "Option A:", etc.
+          const headerMatch = block.match(/^(Why\s+Option\s+[A-C][^\n:]*|Why\s+[A-C][^\n:]*|Option\s+[A-C][^\n:]*|Why\s+it\s+fails|Why\s+this\s+fails|Why\s+this\s+works)[:\s\-]?/i);
 
-          if (isOptionHeader) {
+          if (headerMatch) {
+            const headerText = headerMatch[0].replace(/[:\-]$/, '').trim();
+            const bodyText = block.substring(headerMatch[0].length).trim();
+            
+            const upperHeader = headerText.toUpperCase();
+            const isOptimal = upperHeader.includes('OPTIMAL') || upperHeader.includes('CORRECT') || upperHeader.includes('BEST') || upperHeader.includes('WORKS');
+            const isFail = upperHeader.includes('FAIL') || upperHeader.includes('INCORRECT') || upperHeader.includes('RISK');
+
             return (
-              <View key={index} style={styles.subHeadingBadgeRow}>
+              <View key={index} style={styles.quizSectionBlock}>
                 <Text style={[
                   styles.optionBreakdownHeading,
-                  isOptimalHeader ? { color: '#39FF14' } : isFailHeader ? { color: '#FF4D4D' } : { color: '#3B82F6' }
+                  isOptimal ? { color: '#39FF14' } : isFail ? { color: '#FF4D4D' } : { color: '#3B82F6' }
                 ]}>
-                  {isOptimalHeader && !part.startsWith('🟢') ? `🟢 ${part}` : isFailHeader && !part.startsWith('🔴') ? `🔴 ${part}` : part}
+                  {isOptimal ? `🟢 ${headerText}` : isFail ? `🔴 ${headerText}` : `🔵 ${headerText}`}
                 </Text>
+                {bodyText.length > 0 && (
+                  <Text style={styles.explanationBodyText}>
+                    {bodyText.replace(/^[•\-\*]\s*/, '')}
+                  </Text>
+                )}
               </View>
             );
           }
+
+          // Fallback rendering for general non-header paragraphs
+          const upperBlock = block.toUpperCase();
+          const isOptimal = upperBlock.includes('OPTIMAL') || upperBlock.includes('CORRECT');
+          const isFail = upperBlock.includes('FAIL') || upperBlock.includes('INCORRECT');
+
           return (
-            <Text key={index} style={styles.explanationBodyText}>
-              • {part.replace(/^[•\-\*]\s*/, '')}
-            </Text>
+            <View key={index} style={styles.quizSectionBlock}>
+              <Text style={[
+                styles.explanationBodyText,
+                isOptimal ? { color: '#39FF14', fontWeight: 'bold' } : isFail ? { color: '#FF4D4D' } : { color: '#CBD5E1' }
+              ]}>
+                • {block.replace(/^[•\-\*]\s*/, '')}
+              </Text>
+            </View>
           );
         })}
       </View>
@@ -1025,11 +1055,11 @@ const styles = StyleSheet.create({
   quizOptionBtn: { backgroundColor: '#0B0E14', padding: 14, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44', marginBottom: 8 },
   quizOptionText: { color: '#CBD5E1', fontSize: 13, fontWeight: 'bold' },
   explanationBox: { backgroundColor: '#0B0E14', padding: 14, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44', marginTop: 12 },
-  explanationContentBox: { marginBottom: 12 },
-  explanationHeaderTitle: { color: '#39FF14', fontWeight: 'bold', fontSize: 12, letterSpacing: 0.5, marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#2E3A44', paddingBottom: 4 },
-  subHeadingBadgeRow: { marginTop: 8, marginBottom: 3 },
-  optionBreakdownHeading: { fontWeight: 'bold', fontSize: 13 },
-  explanationBodyText: { color: '#CBD5E1', fontSize: 12, lineHeight: 18, marginBottom: 4 },
+  explanationContentBox: { marginBottom: 8 },
+  explanationHeaderTitle: { color: '#39FF14', fontWeight: 'bold', fontSize: 12, letterSpacing: 0.5, marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#2E3A44', paddingBottom: 6 },
+  quizSectionBlock: { marginBottom: 12 },
+  optionBreakdownHeading: { fontWeight: 'bold', fontSize: 13, marginBottom: 3 },
+  explanationBodyText: { color: '#CBD5E1', fontSize: 12, lineHeight: 19 },
 
   pitchCanvasFrame: {
     width: '100%',

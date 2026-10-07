@@ -1,90 +1,80 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../supabase';
 
-const OFFLINE_QUEUE_KEY = '@matchday_offline_queue';
+const QUEUE_KEY = '@tactical_engine_offline_queue';
 
 /**
- * Fetch all currently queued offline events from local storage.
+ * Retrieves all locally queued offline items from AsyncStorage.
  */
 export const getOfflineQueue = async () => {
   try {
-    const rawQueue = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
-    return rawQueue ? JSON.parse(rawQueue) : [];
-  } catch (error) {
-    console.error('❌ Failed to read offline queue from AsyncStorage:', error);
+    const raw = await AsyncStorage.getItem(QUEUE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    console.error('❌ Error reading offline queue:', e);
     return [];
   }
 };
 
 /**
- * Add a failed network event payload to local device storage.
- * @param {Object} item - { table: 'live_ticker' | 'match_history', payload: Object }
+ * Enqueues an offline payload (e.g. live ticker events, stats) when network fails.
  */
 export const enqueueOfflineEvent = async (item) => {
   try {
-    const queue = await getOfflineQueue();
-    const newItem = {
-      queueId: `${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      timestamp: new Date().toISOString(),
-      ...item
-    };
-    const updatedQueue = [...queue, newItem];
-    await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(updatedQueue));
-    console.log(`📦 Enqueued event locally [Queue size: ${updatedQueue.length}]`);
+    const currentQueue = await getOfflineQueue();
+    const updatedQueue = [...currentQueue, { ...item, enqueuedAt: new Date().toISOString() }];
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(updatedQueue));
     return updatedQueue;
-  } catch (error) {
-    console.error('❌ Failed to write to offline queue:', error);
+  } catch (e) {
+    console.error('❌ Error enqueuing offline event:', e);
     return [];
   }
 };
 
 /**
- * Attempt to flush all queued items to Supabase.
- * Retains any items that fail due to persistent network issues.
+ * Clears the entire offline queue from local storage.
+ */
+export const clearOfflineQueue = async () => {
+  try {
+    await AsyncStorage.removeItem(QUEUE_KEY);
+  } catch (e) {
+    console.error('❌ Error clearing offline queue:', e);
+  }
+};
+
+/**
+ * Flushes the queue by attempting to push each item to Supabase in FIFO order.
+ * Successfully inserted items are removed; failed ones remain queued.
  */
 export const flushOfflineQueue = async () => {
-  try {
-    const queue = await getOfflineQueue();
-    if (queue.length === 0) return { success: true, flushedCount: 0 };
+  const queue = await getOfflineQueue();
+  if (queue.length === 0) return { flushedCount: 0, remainingCount: 0 };
 
-    console.log(`📡 Attempting to flush ${queue.length} offline events to Supabase...`);
-    const remainingQueue = [];
-    let flushedCount = 0;
+  const remainingQueue = [];
+  let flushedCount = 0;
 
-    for (const item of queue) {
+  for (const item of queue) {
+    try {
       const { table, payload } = item;
-      const { error } = await supabase.from(table).insert([payload]);
+      if (!table || !payload) continue;
 
+      const { error } = await supabase.from(table).insert([payload]);
       if (error) {
-        console.error(`⚠️ Failed to sync queue item (${item.queueId}):`, error.message);
+        // Keep in queue if Supabase rejected due to network/server failure
         remainingQueue.push(item);
       } else {
         flushedCount++;
       }
+    } catch (e) {
+      remainingQueue.push(item);
     }
-
-    await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remainingQueue));
-    console.log(`✅ Flushed ${flushedCount} events. ${remainingQueue.length} items remaining in queue.`);
-    
-    return {
-      success: remainingQueue.length === 0,
-      flushedCount,
-      remainingCount: remainingQueue.length
-    };
-  } catch (error) {
-    console.error('❌ Error during queue flush:', error);
-    return { success: false, error: error.message };
   }
-};
 
-/**
- * Clear the offline queue entirely (e.g. on season or match reset).
- */
-export const clearOfflineQueue = async () => {
   try {
-    await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY);
-    console.log('🧹 Offline queue cleared.');
-  } catch (error) {
-    console.error('❌ Failed to clear offline queue:', error);
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remainingQueue));
+  } catch (e) {
+    console.error('❌ Error saving remaining queue state:', e);
   }
+
+  return { flushedCount, remainingCount: remainingQueue.length };
 };
