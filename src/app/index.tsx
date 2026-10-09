@@ -1,3 +1,4 @@
+import * as Linking from 'expo-linking';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useEffect, useState } from 'react';
 import {
@@ -277,6 +278,20 @@ export default function App() {
     }
     changeOrientation();
   }, [activeVideoId]);
+    // 🔗 DEEP LINK LISTENER (Auto-captures join code from WhatsApp links)
+const initialUrl = Linking.useURL();
+
+useEffect(() => {
+  if (initialUrl) {
+    const parsed = Linking.parse(initialUrl);
+    const codeParam = parsed.queryParams?.code;
+    if (codeParam) {
+      const cleanCode = String(codeParam).trim().toUpperCase();
+      setFamilyCodeInput(cleanCode);
+      setOnboardingStep('parent_notice'); // Automatically jump to Join Code step
+    }
+  }
+}, [initialUrl]);
   const openDrillVideo = (url) => {
     const videoId = getYouTubeId(url);
     if (videoId) {
@@ -531,6 +546,21 @@ export default function App() {
     }
   }
 
+  async function handleSignOut() {
+    // 1. Wipe local memory instantly so the Login screen appears immediately
+    setSession(null);
+    setProfile(null);
+    setMyTeams([]);
+    setActiveTeamId(null);
+    
+    // 2. Tell Supabase to destroy the token in the background
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn("Sign out warning:", err);
+    }
+  }
+
   async function handleAuth() {
     Keyboard.dismiss();
     setAuthMessage({ text: '', type: '' });
@@ -658,27 +688,36 @@ export default function App() {
   }, [appMode, effectiveAgeGroup, playerTab]);
 
   useEffect(() => {
-    if (activeTeamId) {
-      supabase
-        .from('teams')
-        .select('fa_league_table_url, age_group, logo_url')
-        .eq('id', activeTeamId)
-        .single()
-        .then(({ data, error }) => {
-          if (data) {
-            setFaLeagueUrl(data.fa_league_table_url || '');
-            if (data.age_group) setTeamAgeGroup(data.age_group);
-            if (data.logo_url) setTeamLogoUrl(data.logo_url || '');
-          }
-        });
+  if (activeTeamId) {
+    supabase
+      .from('teams')
+      .select('fa_league_table_url, age_group, logo_url, default_formation')
+      .eq('id', activeTeamId)
+      .single()
+      .then(({ data, error }) => {
+        if (data) {
+          setFaLeagueUrl(data.fa_league_table_url || '');
+          const ageGrp = data.age_group || 'U16';
+          setTeamAgeGroup(ageGrp);
+          if (data.logo_url) setTeamLogoUrl(data.logo_url || '');
 
-      fetchTeamData(session?.user?.id, activeTeamId);
-      fetchMatchNotes(activeTeamId);
-      fetchLiveTicker(activeTeamId);
-      fetchMatchHistory(activeTeamId);
-      fetchSeasonReports(activeTeamId);
-    }
-  }, [activeTeamId]);
+          const is9v9 = ['U11', 'U12', 'U13'].includes(String(ageGrp).toUpperCase());
+          const teamFmt = data.default_formation || (is9v9 ? '3-3-2' : '4-2-3-1');
+
+          setActiveFormation(teamFmt);
+
+          // Update local myTeams state so future tab switches are instant
+          setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, default_formation: teamFmt, age_group: ageGrp } : t));
+        }
+      });
+
+    fetchTeamData(session?.user?.id, activeTeamId);
+    fetchMatchNotes(activeTeamId);
+    fetchLiveTicker(activeTeamId);
+    fetchMatchHistory(activeTeamId);
+    fetchSeasonReports(activeTeamId);
+  }
+}, [activeTeamId]);
 
   useEffect(() => {
     let interval;
@@ -1487,6 +1526,34 @@ export default function App() {
       if (session) fetchTeamData(session.user.id, activeTeamId);
     }
   };
+  // 🚫 COACH FUNCTION: Unlink / Revoke Parent Access
+async function removeParentLinkFromPlayer(parentId, playerId, parentEmail) {
+  Alert.alert(
+    "Revoke Parent Access",
+    `Are you sure you want to remove ${parentEmail || 'this user'} from this player's profile?`,
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove Access",
+        style: "destructive",
+        onPress: async () => {
+          const { error } = await supabase
+            .from('parent_players')
+            .delete()
+            .eq('parent_id', parentId)
+            .eq('player_id', playerId);
+
+          if (error) {
+            Alert.alert("Error", error.message);
+          } else {
+            Alert.alert("Access Revoked", "Parent access successfully removed.");
+            if (session) fetchTeamData(session.user.id, activeTeamId);
+          }
+        }
+      }
+    ]
+  );
+}
 
   const finalizeDeleteTeam = async () => {
     if (deleteTeamConfirmText.trim().toLowerCase() !== 'delete team') {
@@ -1701,16 +1768,25 @@ export default function App() {
   };
 
   const shareCoParentInvite = (childName, code) => {
-    Share.share({ message: `Hey! Join our team app on Expo Go to manage ${childName || 'your child'}'s matchday RSVPs and view tactical notes. Use this secure join code: ${code || 'FAM-942'}`, });
-  };
-  
-  const shareFanInvite = (childName, code) => {
-    Share.share({ message: `Hey! Join the app on Expo Go as a Fan for ${childName || 'our player'}. Follow live match events and cast your vote for Player of the Match! Use this secure fan code: ${code || 'FAM-942'}`, });
-  };
+  const deepLink = Linking.createURL('join', { queryParams: { code } });
+  Share.share({
+    message: `Hey! Join our team app for ${childName || 'our player'}.\n\n1. Download the app / Expo Go\n2. Tap this link to open directly with your join code: ${deepLink}\n\nOr manually enter Join Code: ${code}`,
+  });
+};
 
-  const shareStaffInvite = (teamName, code) => {
-    Share.share({ message: `Hey! Join ${teamName || 'our team'} as an Assistant Coach / Staff member in the app on Expo Go. Enter this secure Staff Join Code: ${code || 'STAF-942'}`, });
-  };
+const shareFanInvite = (childName, code) => {
+  const deepLink = Linking.createURL('join', { queryParams: { code } });
+  Share.share({
+    message: `Hey! Join our team app as a Fan to follow live matches and vote for Player of the Match!\n\nTap link to join: ${deepLink}\nOr enter Code: ${code}`,
+  });
+};
+
+const shareStaffInvite = (teamName, code) => {
+  const deepLink = Linking.createURL('join', { queryParams: { code } });
+  Share.share({
+    message: `Hey! Join ${teamName || 'our team'} as Staff / Assistant Coach.\n\nTap link to join: ${deepLink}\nOr enter Staff Code: ${code}`,
+  });
+};
 
   const handleQuizAnswer = (idx, isCorrect) => {
     setQuizState({ answered: true, isCorrect, selectedIdx: idx });
@@ -1842,20 +1918,16 @@ export default function App() {
     );
   }
 
+  // 🔒 LOGIN / SIGN-UP SCREEN
   if (!session) {
     return (
       <SafeAreaView style={styles.authContainer}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
             <View style={styles.authBox}>
-              <Image
-                source={{ uri: SUPABASE_LOGO_URL }}
-                style={{ width: '100%', height: 110, marginBottom: 15 }}
-                resizeMode="contain"
-              />
               <Text style={styles.authHeaderSub}>Tactical Engine</Text>
-              <Text style={styles.authHeaderTitle}>{authMode === 'signin' ? 'Coach & Player Login' : 'Create Account'}</Text>
-              
+              <Text style={styles.authHeaderTitle}>{authMode === 'signin' ? 'Sign In' : 'Create Account'}</Text>
+
               {authMessage.text ? (
                 <Text style={authMessage.type === 'error' ? styles.errorText : styles.successText}>
                   {authMessage.text}
@@ -1864,18 +1936,19 @@ export default function App() {
 
               {authMode === 'signup' && (
                 <>
-                  <Text style={styles.inputLabel}>Full Name</Text>
+                  <Text style={styles.inputLabel}>Full Name:</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="e.g. John Doe"
+                    placeholder="e.g. Pep Guardiola"
                     placeholderTextColor="#64748b"
                     value={fullName}
                     onChangeText={setFullName}
+                    autoCapitalize="words"
                   />
                 </>
               )}
 
-              <Text style={styles.inputLabel}>Email Address</Text>
+              <Text style={styles.inputLabel}>Email Address:</Text>
               <TextInput
                 style={styles.input}
                 placeholder="coach@example.com"
@@ -1886,10 +1959,10 @@ export default function App() {
                 keyboardType="email-address"
               />
 
-              <Text style={styles.inputLabel}>Password</Text>
+              <Text style={styles.inputLabel}>Password:</Text>
               <TextInput
                 style={styles.input}
-                placeholder="••••••••"
+                placeholder="********"
                 placeholderTextColor="#64748b"
                 value={password}
                 onChangeText={setPassword}
@@ -1898,7 +1971,7 @@ export default function App() {
 
               <TouchableOpacity style={styles.primaryAuthBtn} onPress={handleAuth}>
                 <Text style={styles.primaryAuthBtnText}>
-                  {authMode === 'signin' ? 'Sign In' : 'Create Account'}
+                  {authMode === 'signin' ? 'Sign In' : 'Sign Up'}
                 </Text>
               </TouchableOpacity>
 
@@ -1919,6 +1992,103 @@ export default function App() {
       </SafeAreaView>
     );
   }
+  // 🔒 ROLE SELECTION GATE FOR NEW ACCOUNTS
+if (session && profile && !profile.role_configured) {
+  return (
+    <SafeAreaView style={styles.authContainer}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
+          <View style={styles.authBox}>
+            <Text style={styles.authHeaderSub}>Welcome to Tactical Engine</Text>
+            <Text style={styles.authHeaderTitle}>Select Your Role</Text>
+
+            {onboardingStep === 'choose_path' && (
+              <>
+                <TouchableOpacity 
+                  style={styles.wizardOptionBtn} 
+                  onPress={() => setOnboardingStep('coach_setup')}
+                >
+                  <Text style={styles.wizardOptionTitle}>⚽ Coach / Club Admin</Text>
+                  <Text style={styles.wizardOptionSub}>Create a new team, direct matchday strategy, and run training.</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[styles.wizardOptionBtn, { borderColor: '#3b82f6' }]} 
+                  onPress={() => setOnboardingStep('parent_notice')}
+                >
+                  <Text style={[styles.wizardOptionTitle, { color: '#3b82f6' }]}>👪 Parent, Player, or Fan</Text>
+                  <Text style={styles.wizardOptionSub}>View matchday lineups, RSVP, view stats, and vote for Player of the Match.</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {onboardingStep === 'coach_setup' && (
+              <>
+                <Text style={styles.inputLabel}>Team Name:</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. Marlow United U16"
+                  placeholderTextColor="#64748b"
+                  value={teamName}
+                  onChangeText={setTeamName}
+                />
+
+                <Text style={styles.inputLabel}>Age Group:</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 15 }}>
+                  {['U11', 'U12', 'U13', 'U14', 'U15', 'U16', 'Adult'].map(ag => (
+                    <TouchableOpacity
+                      key={ag}
+                      style={[styles.fmtBtn, teamAgeGroup === ag && styles.fmtBtnActive]}
+                      onPress={() => setTeamAgeGroup(ag)}
+                    >
+                      <Text style={[styles.fmtBtnText, teamAgeGroup === ag && styles.fmtBtnTextActive]}>{ag}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TouchableOpacity style={styles.primaryAuthBtn} onPress={createTeamFlow}>
+                  <Text style={styles.primaryAuthBtnText}>Create Team & Enter Coach Hub</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={{ marginTop: 15 }} onPress={() => setOnboardingStep('choose_path')}>
+                  <Text style={styles.switchAuthText}>← Back to Role Selection</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {onboardingStep === 'parent_notice' && (
+              <>
+                <View style={{ backgroundColor: '#0B0E14', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#3b82f6', marginBottom: 15 }}>
+                  <Text style={{ color: '#ffffff', fontSize: 13, lineHeight: 18, textAlign: 'center' }}>
+                    📢 <Text style={{ fontWeight: 'bold', color: '#3b82f6' }}>Notice:</Text> Ask your lead coach for a secure Join Link or Code (e.g. <Text style={{ color: '#39FF14' }}>FAM-123</Text> or <Text style={{ color: '#39FF14' }}>STAF-123</Text>).
+                  </Text>
+                </View>
+
+                <Text style={styles.inputLabel}>Join Code:</Text>
+                <TextInput
+                  style={[styles.input, familyCodeInput ? { borderColor: '#39FF14', color: '#39FF14', fontWeight: 'bold' } : null]}
+                  placeholder="e.g. FAM-1234 or STAF-1234"
+                  placeholderTextColor="#64748b"
+                  value={familyCodeInput}
+                  onChangeText={setFamilyCodeInput}
+                  autoCapitalize="characters"
+                />
+
+                <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#3b82f6' }]} onPress={linkChildFlow}>
+                  <Text style={[styles.primaryAuthBtnText, { color: '#ffffff' }]}>Link Account & Continue</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={{ marginTop: 15 }} onPress={() => setOnboardingStep('choose_path')}>
+                  <Text style={styles.switchAuthText}>← Back to Role Selection</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
   // ---------------------------------------
   return (
     <SafeAreaView style={styles.container}>
@@ -1946,28 +2116,37 @@ export default function App() {
             <Text style={[styles.masterToggleBtnText, appMode === 'player' && styles.masterToggleBtnTextActive]}>PLAYER</Text>
           </TouchableOpacity>
         </View>
-        <TouchableOpacity style={styles.signOutBtn} onPress={() => supabase.auth.signOut()}><Text style={styles.signOutBtnText}>Log Out</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
+  <Text style={styles.signOutBtnText}>Log Out</Text>
+</TouchableOpacity>
       </View>
 
-      {/* MULTI-TEAM HORIZONTAL SELECTOR BAR WITH INSTANT AGE-GROUP STATE UPDATE */}
-      {appMode === 'coach' && myTeams.length > 0 && (
-        <View style={styles.teamSelectorBar}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {myTeams.map(t => (
-              <TouchableOpacity 
-                key={t.id} 
-                style={[styles.teamTab, activeTeamId === t.id && styles.teamTabActive]}
-                onPress={() => {
-                  setActiveTeamId(t.id);
-                  if (t.age_group) setTeamAgeGroup(t.age_group);
-                }}
-              >
-                <Text style={[styles.teamTabText, activeTeamId === t.id && styles.teamTabTextActive]}>{t.name} ({t.age_group || 'U16'})</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+      {/* MULTI-TEAM HORIZONTAL SELECTOR BAR */}
+{appMode === 'coach' && myTeams.length > 0 && (
+  <View style={styles.teamSelectorBar}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      {myTeams.map(t => (
+        <TouchableOpacity 
+          key={t.id} 
+          style={[styles.teamTab, activeTeamId === t.id && styles.teamTabActive]}
+          onPress={() => {
+            setActiveTeamId(t.id);
+            const ageGrp = t.age_group || 'U16';
+            setTeamAgeGroup(ageGrp);
+
+            // ⚡ Instant local formation switch on tap
+            const is9v9 = ['U11', 'U12', 'U13'].includes(String(ageGrp).toUpperCase());
+            setActiveFormation(t.default_formation || (is9v9 ? '3-3-2' : '4-2-3-1'));
+          }}
+        >
+          <Text style={[styles.teamTabText, activeTeamId === t.id && styles.teamTabTextActive]}>
+            {t.name} ({t.age_group || 'U16'})
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  </View>
+)}
 
       {/* SCREEN ROUTER VIEWER */}
       <View style={styles.screenViewer}>
@@ -2089,28 +2268,29 @@ export default function App() {
         )}
 
         {/* LINEUP SCREEN (ALL MODES) */}
-        {currentTab === 'lineup' && (
-          <LineupScreen
-            activeFormation={activeFormation}
-            appMode={appMode}
-            lineupViewMode={lineupViewMode}
-            setLineupViewMode={setLineupViewMode}
-            setIsFormationModalOpen={setIsFormationModalOpen}
-            isTafeDisabled={isTafeDisabled}
-            openTafeModal={openTafeModal}
-            isLoadingSheet={isLoadingSheet}
-            squadDepthFilter={squadDepthFilter}
-            setSquadDepthFilter={setSquadDepthFilter}
-            activeLayout={activeLayout}
-            renderDepthPosition={renderDepthPosition}
-            renderPosition={renderPosition}
-            subs={subs}
-            setLineupAssignPlayer={setLineupAssignPlayer}
-            getFootednessString={getFootednessString}
-            teamSheet={teamSheet}
-            currentAvailablePositions={currentAvailablePositions}
-          />
-        )}
+{currentTab === 'lineup' && (
+  <LineupScreen
+    activeFormation={activeFormation}
+    appMode={appMode}
+    lineupViewMode={lineupViewMode}
+    setLineupViewMode={setLineupViewMode}
+    setIsFormationModalOpen={setIsFormationModalOpen}
+    isTafeDisabled={isTafeDisabled}
+    openTafeModal={openTafeModal}
+    isLoadingSheet={isLoadingSheet}
+    squadDepthFilter={squadDepthFilter}
+    setSquadDepthFilter={setSquadDepthFilter}
+    activeLayout={activeLayout}
+    renderDepthPosition={renderDepthPosition}
+    renderPosition={renderPosition}
+    subs={subs}
+    setLineupAssignPlayer={setLineupAssignPlayer}
+    getFootednessString={getFootednessString}
+    teamSheet={teamSheet}
+    setTeamSheet={setTeamSheet}
+    currentAvailablePositions={currentAvailablePositions}
+  />
+)}
 
         {/* STATS / TEAM SHEET (ALL MODES) */}
         {currentTab === 'teamSheet' && (
@@ -2286,11 +2466,16 @@ export default function App() {
       />
 
       <FormationModal
-        visible={isFormationModalOpen}
-        onClose={() => setIsFormationModalOpen(false)}
-        activeFormation={activeFormation}
-        setActiveFormation={setActiveFormation}
-      />
+  visible={isFormationModalOpen}
+  onClose={() => setIsFormationModalOpen(false)}
+  activeFormation={activeFormation}
+  setActiveFormation={setActiveFormation}
+  teamSheet={teamSheet}
+  setTeamSheet={setTeamSheet}
+  ageGroup={activeTeamObj?.age_group}
+  activeTeamId={activeTeamId}
+  setMyTeams={setMyTeams}
+/>
 
       <TafeModal
         visible={isTafeModalOpen}

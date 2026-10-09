@@ -1,3 +1,7 @@
+// ==========================================
+// FORMATION CATEGORIES (FOR MODAL SELECTION)
+// ==========================================
+
 export const formationCategories = [
   {
     title: '4-at-the-Back',
@@ -13,7 +17,18 @@ export const formationCategories = [
   }
 ];
 
-export const formationLayouts = {
+export const formationCategories9v9 = [
+  {
+    title: '9v9 Standard Systems',
+    formations: ['3-3-2', '3-2-3', '3-1-3-1', '4-3-1', '3-4-1', '2-3-3']
+  }
+];
+
+// ==========================================
+// 11v11 FORMATION LAYOUTS
+// ==========================================
+
+export const formationLayouts11v11 = {
   '4-2-3-1': [
     { code: 'ST', label: 'ST', top: '8%', left: '50%' },
     { code: 'LW', label: 'LW', top: '22%', left: '20%' },
@@ -249,6 +264,89 @@ export const formationLayouts = {
     { code: 'GK', label: 'GK', top: '88%', left: '50%' }
   ]
 };
+
+// ==========================================
+// 9v9 FORMATION LAYOUTS
+// ==========================================
+
+export const formationLayouts9v9 = {
+  '3-3-2': [
+    { code: 'LS', label: 'ST', top: '18%', left: '35%' },
+    { code: 'RS', label: 'ST', top: '18%', left: '65%' },
+    { code: 'LM', label: 'LM', top: '46%', left: '20%' },
+    { code: 'CM', label: 'CM', top: '46%', left: '50%' },
+    { code: 'RM', label: 'RM', top: '46%', left: '80%' },
+    { code: 'LB', label: 'LB', top: '70%', left: '20%' },
+    { code: 'CB', label: 'CB', top: '72%', left: '50%' },
+    { code: 'RB', label: 'RB', top: '70%', left: '80%' },
+    { code: 'GK', label: 'GK', top: '88%', left: '50%' }
+  ],
+  '3-2-3': [
+    { code: 'LW', label: 'LW', top: '22%', left: '18%' },
+    { code: 'ST', label: 'ST', top: '18%', left: '50%' },
+    { code: 'RW', label: 'RW', top: '22%', left: '82%' },
+    { code: 'LCM', label: 'DM', top: '50%', left: '35%' },
+    { code: 'RCM', label: 'DM', top: '50%', left: '65%' },
+    { code: 'LB', label: 'LB', top: '70%', left: '20%' },
+    { code: 'CB', label: 'CB', top: '72%', left: '50%' },
+    { code: 'RB', label: 'RB', top: '70%', left: '80%' },
+    { code: 'GK', label: 'GK', top: '88%', left: '50%' }
+  ],
+  '3-1-3-1': [
+    { code: 'ST', label: 'ST', top: '18%', left: '50%' },
+    { code: 'LM', label: 'LM', top: '36%', left: '20%' },
+    { code: 'CAM', label: 'AM', top: '36%', left: '50%' },
+    { code: 'RM', label: 'RM', top: '36%', left: '80%' },
+    { code: 'CDM', label: 'DM', top: '54%', left: '50%' },
+    { code: 'LB', label: 'LB', top: '72%', left: '22%' },
+    { code: 'CB', label: 'CB', top: '72%', left: '50%' },
+    { code: 'RB', label: 'RB', top: '72%', left: '78%' },
+    { code: 'GK', label: 'GK', top: '88%', left: '50%' }
+  ],
+  '4-3-1': [
+    { code: 'ST', label: 'ST', top: '18%', left: '50%' },
+    { code: 'LM', label: 'LM', top: '46%', left: '22%' },
+    { code: 'CM', label: 'CM', top: '46%', left: '50%' },
+    { code: 'RM', label: 'RM', top: '46%', left: '78%' },
+    { code: 'LB', label: 'LB', top: '70%', left: '15%' },
+    { code: 'LCB', label: 'CB', top: '72%', left: '38%' },
+    { code: 'RCB', label: 'CB', top: '72%', left: '62%' },
+    { code: 'RB', label: 'RB', top: '70%', left: '85%' },
+    { code: 'GK', label: 'GK', top: '88%', left: '50%' }
+  ],
+  '3-4-1': [
+    { code: 'ST', label: 'ST', top: '18%', left: '50%' },
+    { code: 'LWB', label: 'LM', top: '46%', left: '15%' },
+    { code: 'LCM', label: 'CM', top: '46%', left: '38%' },
+    { code: 'RCM', label: 'CM', top: '46%', left: '62%' },
+    { code: 'RWB', label: 'RM', top: '46%', left: '85%' },
+    { code: 'LCB', label: 'CB', top: '72%', left: '25%' },
+    { code: 'CB', label: 'CB', top: '72%', left: '50%' },
+    { code: 'RCB', label: 'CB', top: '72%', left: '75%' },
+    { code: 'GK', label: 'GK', top: '88%', left: '50%' }
+  ],
+  '2-3-3': [
+    { code: 'LW', label: 'LW', top: '20%', left: '20%' },
+    { code: 'ST', label: 'ST', top: '18%', left: '50%' },
+    { code: 'RW', label: 'RW', top: '20%', left: '80%' },
+    { code: 'LM', label: 'LM', top: '48%', left: '20%' },
+    { code: 'CM', label: 'CM', top: '48%', left: '50%' },
+    { code: 'RM', label: 'RM', top: '48%', left: '80%' },
+    { code: 'LCB', label: 'CB', top: '72%', left: '35%' },
+    { code: 'RCB', label: 'CB', top: '72%', left: '65%' },
+    { code: 'GK', label: 'GK', top: '88%', left: '50%' }
+  ]
+};
+
+// Unified export so looking up any layout key continues to work
+export const formationLayouts = {
+  ...formationLayouts11v11,
+  ...formationLayouts9v9
+};
+
+// ==========================================
+// GAME STATE TACTICS
+// ==========================================
 
 export const gameStateTactics = {
   leading: { title: 'PROTECT & CONTROL (Leading)', instructions: '• Controlled possession: Make the opponent chase.\n• Manage match tempo and select forward moments intelligently.', shout: '"Value the ball! Keep our central protection locked!"' },

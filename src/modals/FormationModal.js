@@ -1,15 +1,125 @@
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { formationCategories } from '../constants/tactics';
+import { formationCategories, formationCategories9v9, formationLayouts } from '../constants/tactics';
+import { supabase } from '../supabase';
 
-export default function FormationModal({ visible, onClose, activeFormation, setActiveFormation }) {
+// Position Remapping Hierarchy Matrix
+const REMAP_PRIORITIES = {
+  'LF': ['LW', 'LF', 'LM', 'ST', 'CAM'],
+  'RF': ['RW', 'RF', 'RM', 'ST', 'CAM'],
+  'LW': ['LF', 'LW', 'LM', 'ST', 'CAM'],
+  'RW': ['RF', 'RW', 'RM', 'ST', 'CAM'],
+  'LM': ['LW', 'LF', 'LM', 'LCM', 'CM'],
+  'RM': ['RW', 'RF', 'RM', 'RCM', 'CM'],
+  'CDM': ['CDM', 'LDM', 'RDM', 'CM', 'LCM', 'RCM', 'CB'],
+  'LDM': ['CDM', 'LDM', 'CM', 'LCM', 'CB'],
+  'RDM': ['CDM', 'RDM', 'CM', 'RCM', 'CB'],
+  'CAM': ['CAM', 'CF', 'LAM', 'RAM', 'CM', 'LCM', 'RCM', 'ST', 'LW', 'RW'],
+  'LAM': ['CAM', 'LAM', 'LW', 'LM', 'CM'],
+  'RAM': ['CAM', 'RAM', 'RW', 'RM', 'CM'],
+  'CF': ['CAM', 'CF', 'ST', 'CM'],
+  'LCM': ['LCM', 'CM', 'CDM', 'CAM', 'LM'],
+  'RCM': ['RCM', 'CM', 'CDM', 'CAM', 'RM'],
+  'CM': ['CM', 'LCM', 'RCM', 'CDM', 'CAM'],
+  'LWB': ['LWB', 'LB', 'LM'],
+  'RWB': ['RWB', 'RB', 'RM'],
+  'LB': ['LB', 'LWB', 'LCB', 'CB'],
+  'RB': ['RB', 'RWB', 'RCB', 'CB'],
+  'LCB': ['LCB', 'CB', 'LB', 'CDM'],
+  'RCB': ['RCB', 'CB', 'RB', 'CDM'],
+  'CB': ['CB', 'LCB', 'RCB', 'CDM'],
+  'ST': ['ST', 'CF', 'LS', 'RS', 'CAM'],
+  'LS': ['ST', 'LS', 'CF'],
+  'RS': ['ST', 'RS', 'CF'],
+  'GK': ['GK', 'SGK'],
+  'SGK': ['GK', 'SGK']
+};
+
+export default function FormationModal({
+  visible,
+  onClose,
+  activeFormation,
+  setActiveFormation,
+  teamSheet = [],
+  setTeamSheet,
+  ageGroup,
+  activeTeamId,
+  setMyTeams
+}) {
+  // ⚡ Declared here so it's accessible everywhere inside this component
+  const is9v9 = ['U11', 'U12', 'U13'].includes(String(ageGroup || '').toUpperCase());
+  const activeCategories = is9v9 ? formationCategories9v9 : formationCategories;
+
+  // Smart Formation Switcher that remaps starters gracefully
+  const handleSelectFormation = async (newFormation) => {
+    setActiveFormation(newFormation);
+
+    // 1. Update local team memory immediately
+    if (activeTeamId && setMyTeams) {
+      setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, default_formation: newFormation } : t));
+    }
+
+    // 2. Persist choice to Supabase
+    if (activeTeamId) {
+      try {
+        await supabase.from('teams').update({ default_formation: newFormation }).eq('id', activeTeamId);
+      } catch (err) {
+        console.warn('⚠️ Default formation update saved locally:', err);
+      }
+    }
+
+    const targetLayout = formationLayouts[newFormation] || [];
+    const availableSlotCodes = targetLayout.map(s => s.code);
+    const occupiedSlots = new Set();
+    const dbUpdates = [];
+
+    const updatedSheet = teamSheet.map(p => {
+      if (!p.is_starter || !p.available) return p;
+
+      const currentPos = String(p.matchday_position || '').toUpperCase();
+
+      if (availableSlotCodes.includes(currentPos) && !occupiedSlots.has(currentPos)) {
+        occupiedSlots.add(currentPos);
+        return p;
+      }
+
+      const priorityList = REMAP_PRIORITIES[currentPos] || [currentPos];
+      const remappedSlot = priorityList.find(candidate => availableSlotCodes.includes(candidate) && !occupiedSlots.has(candidate));
+
+      if (remappedSlot) {
+        occupiedSlots.add(remappedSlot);
+        dbUpdates.push(supabase.from('players').update({ matchday_position: remappedSlot }).eq('id', p.id));
+        return { ...p, matchday_position: remappedSlot };
+      }
+
+      dbUpdates.push(supabase.from('players').update({ matchday_position: 'Bench', is_starter: false }).eq('id', p.id));
+      return { ...p, matchday_position: 'Bench', is_starter: false };
+    });
+
+    if (setTeamSheet) {
+      setTeamSheet(updatedSheet);
+    }
+
+    if (dbUpdates.length > 0) {
+      try {
+        await Promise.all(dbUpdates);
+      } catch (err) {
+        console.warn('⚠️ Remap DB update saved locally:', err);
+      }
+    }
+
+    onClose();
+  };
+
   return (
     <Modal visible={visible} transparent={true} animationType="fade">
       <View style={styles.modalOverlayFull}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
         <View style={[styles.modalBoxFull, { maxHeight: '85%' }]}>
-          <Text style={styles.modalTitle}>Select Match Formation</Text>
+          <Text style={styles.modalTitle}>
+            Select Match Formation ({is9v9 ? '9v9' : '11v11'})
+          </Text>
           <ScrollView style={{ width: '100%' }} showsVerticalScrollIndicator={false}>
-            {formationCategories.map((category, idx) => (
+            {activeCategories.map((category, idx) => (
               <View key={idx} style={{ marginBottom: 20 }}>
                 <Text style={styles.sectionHeaderModal}>{category.title}</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
@@ -17,7 +127,7 @@ export default function FormationModal({ visible, onClose, activeFormation, setA
                     <TouchableOpacity 
                       key={fmt} 
                       style={[styles.gridBtn, activeFormation === fmt && { backgroundColor: '#39FF14' }, { minWidth: '45%' }]}
-                      onPress={() => { setActiveFormation(fmt); onClose(); }}
+                      onPress={() => handleSelectFormation(fmt)}
                     >
                       <Text style={[styles.gridBtnText, activeFormation === fmt && { color: '#0B0E14' }]}>{fmt}</Text>
                     </TouchableOpacity>

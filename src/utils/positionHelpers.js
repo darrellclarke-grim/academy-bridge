@@ -22,7 +22,8 @@ export const resolvePosForFormation = (pos, formation) => {
   if (!pos || pos === 'None') return '';
   const p = String(pos).toUpperCase();
   const fmt = String(formation);
-  const isFourBack = ['4-2-3-1', '4-3-3 (Holding)', '4-3-3 (Attacking)', '4-3-3 (Flat)', '4-4-2 (Flat)', '4-4-2 (Diamond)', '4-1-4-1', '4-5-1', '4-3-2-1', '4-2-2-2'].includes(fmt);
+  // Added '4-3-1' to 4-at-the-back checking
+  const isFourBack = ['4-3-1', '4-2-3-1', '4-3-3 (Holding)', '4-3-3 (Attacking)', '4-3-3 (Flat)', '4-4-2 (Flat)', '4-4-2 (Diamond)', '4-1-4-1', '4-5-1', '4-3-2-1', '4-2-2-2'].includes(fmt);
 
   if (p.includes('RB/RWB') || p === 'RB' || p === 'RWB') {
     return isFourBack ? 'RB' : 'RWB';
