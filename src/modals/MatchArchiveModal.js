@@ -1,9 +1,10 @@
-import { Modal, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function MatchArchiveModal({
   visible,
   onClose,
-  matchHistory,
+  matchHistory = [],
   appMode,
   teamSheet,
   startArchiveGoalEdit,
@@ -15,9 +16,25 @@ export default function MatchArchiveModal({
   setEditingArchiveMatch,
   setEditingArchiveEventIdx
 }) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [resultFilter, setResultFilter] = useState('ALL'); // 'ALL' | 'W' | 'D' | 'L'
+  const [typeFilter, setTypeFilter] = useState('ALL');   // 'ALL' | 'LEAGUE' | 'CUP' | 'FRIENDLY'
+
+  // Dynamic Multi-Criterion Filter
+  const filteredHistory = (matchHistory || []).filter(m => {
+    const oppName = (m.opponent_name || '').toLowerCase();
+    const matchesSearch = oppName.includes(searchQuery.toLowerCase().trim());
+    const matchesResult = resultFilter === 'ALL' || (m.result || 'D') === resultFilter;
+    const matchTypeStr = (m.match_type || 'League').toUpperCase();
+    const matchesType = typeFilter === 'ALL' || matchTypeStr === typeFilter;
+
+    return matchesSearch && matchesResult && matchesType;
+  });
+
   return (
     <Modal visible={visible} animationType="slide">
       <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0E14' }}>
+        {/* HEADER BAR */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: '#1A1F26', borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
           <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>📜 Past Match Reports</Text>
           <TouchableOpacity onPress={onClose} style={{ backgroundColor: '#0B0E14', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44' }}>
@@ -25,21 +42,73 @@ export default function MatchArchiveModal({
           </TouchableOpacity>
         </View>
 
+        {/* SEARCH & FILTER CONTROLLER BAR */}
+        <View style={styles.filterContainer}>
+          {/* SEARCH INPUT */}
+          <TextInput
+            style={styles.searchInput}
+            placeholder="🔍 Search opponent name..."
+            placeholderTextColor="#64748B"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+          />
+
+          {/* RESULT FILTER CHIPS */}
+          <View style={styles.chipRow}>
+            <Text style={styles.filterLabel}>Result:</Text>
+            {['ALL', 'W', 'D', 'L'].map(res => (
+              <TouchableOpacity
+                key={res}
+                style={[
+                  styles.filterChip,
+                  resultFilter === res && styles.filterChipActive,
+                  res === 'W' && resultFilter === 'W' && { backgroundColor: '#15803D' },
+                  res === 'D' && resultFilter === 'D' && { backgroundColor: '#CA8A04' },
+                  res === 'L' && resultFilter === 'L' && { backgroundColor: '#991B1B' }
+                ]}
+                onPress={() => setResultFilter(res)}
+              >
+                <Text style={[styles.filterChipText, resultFilter === res && styles.filterChipTextActive]}>
+                  {res}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* TYPE FILTER CHIPS */}
+          <View style={styles.chipRow}>
+            <Text style={styles.filterLabel}>Type:</Text>
+            {['ALL', 'LEAGUE', 'CUP', 'FRIENDLY'].map(type => (
+              <TouchableOpacity
+                key={type}
+                style={[styles.filterChip, typeFilter === type && styles.filterChipActive]}
+                onPress={() => setTypeFilter(type)}
+              >
+                <Text style={[styles.filterChipText, typeFilter === type && styles.filterChipTextActive]}>
+                  {type}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* ARCHIVED MATCHES LIST */}
         <ScrollView style={{ padding: 15 }}>
-          {(matchHistory || []).length === 0 ? (
-            <Text style={styles.bulletText}>No past match reports archived yet.</Text>
+          {filteredHistory.length === 0 ? (
+            <Text style={styles.emptyText}>No match reports found matching your criteria.</Text>
           ) : (
-            (matchHistory || []).map((m, idx) => (
-              <View key={idx} style={[styles.card, { borderColor: '#3b82f6', marginBottom: 15 }]}>
+            filteredHistory.map((m, idx) => (
+              <View key={m.id || idx} style={[styles.card, { borderColor: '#3b82f6', marginBottom: 15 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: 'bold' }}>
-                    Us {m.team_score} - {m.opponent_score} {m.opponent_name}
+                    Us {m.team_score ?? 0} - {m.opponent_score ?? 0} {m.opponent_name || 'Opponent'}
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={[styles.resultBadge, m.result === 'W' ? styles.resW : m.result === 'L' ? styles.resL : styles.resD, { marginRight: 0 }]}>
-                      {m.result}
+                      {m.result || 'D'}
                     </Text>
-                    <Text style={{ color: '#3b82f6', fontSize: 11, fontWeight: 'bold' }}>[{m.match_type || 'League'}]</Text>
+                    <Text style={{ color: '#3b82f6', fontSize: 11, fontWeight: 'bold' }}>[{m.match_type ? m.match_type.toUpperCase() : 'LEAGUE'}]</Text>
                   </View>
                 </View>
                 <Text style={{ color: '#64748b', fontSize: 11, marginBottom: 10 }}>Logged: {new Date(m.created_at || Date.now()).toLocaleDateString()}</Text>
@@ -134,8 +203,59 @@ export default function MatchArchiveModal({
 }
 
 const styles = StyleSheet.create({
+  filterContainer: {
+    backgroundColor: '#1A1F26',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2E3A44'
+  },
+  searchInput: {
+    backgroundColor: '#0B0E14',
+    color: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2E3A44',
+    fontSize: 13,
+    marginBottom: 8
+  },
+  chipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 3,
+    gap: 6
+  },
+  filterLabel: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: 'bold',
+    width: 48
+  },
+  filterChip: {
+    backgroundColor: '#0B0E14',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#2E3A44'
+  },
+  filterChipActive: {
+    backgroundColor: '#39FF14',
+    borderColor: '#39FF14'
+  },
+  filterChipText: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  filterChipTextActive: {
+    color: '#0B0E14'
+  },
   card: { backgroundColor: '#1A1F26', borderRadius: 10, padding: 15, marginBottom: 15, borderColor: '#2E3A44', borderWidth: 1 },
   bulletText: { color: '#cbd5e1', fontSize: 14, marginBottom: 6, lineHeight: 20 },
+  emptyText: { color: '#64748B', fontSize: 13, textAlign: 'center', marginTop: 30, fontStyle: 'italic' },
   resultBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginRight: 12, fontWeight: 'bold', fontSize: 13, color: '#ffffff', overflow: 'hidden' },
   resW: { backgroundColor: '#15803d' },
   resD: { backgroundColor: '#ca8a04' },
