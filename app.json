@@ -30,7 +30,7 @@
     },
     "web": {
       "favicon": "./assets/favicon.png",
-      "name": "Tactical Engine Coaching",
+      "name": "Tactical Engine",
       "shortName": "TacticalEngine",
       "themeColor": "#0B0E14",
       "backgroundColor": "#0B0E14",
