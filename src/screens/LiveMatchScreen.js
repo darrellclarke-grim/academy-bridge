@@ -80,18 +80,25 @@ export default function LiveMatchScreen({
               value={opponentName}
               onChangeText={setOpponentName}
             />
-            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 10, marginTop: 4 }}>
+            {/* 3-WAY MATCH TYPE SELECTOR */}
+            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 4 }}>
               <TouchableOpacity 
-                style={[styles.fmtBtn, matchType === 'League' && styles.fmtBtnActive, { flex: 1, paddingVertical: 8 }]}
+                style={[styles.fmtBtn, matchType === 'League' && styles.fmtBtnActive, { flex: 1, paddingVertical: 8, paddingHorizontal: 2 }]}
                 onPress={() => setMatchType('League')}
               >
-                <Text style={[styles.fmtBtnText, matchType === 'League' && styles.fmtBtnTextActive]}>🏆 League Match</Text>
+                <Text style={[styles.fmtBtnText, matchType === 'League' && styles.fmtBtnTextActive]} numberOfLines={1}>🏆 League</Text>
               </TouchableOpacity>
               <TouchableOpacity 
-                style={[styles.fmtBtn, matchType === 'Cup' && styles.fmtBtnActive, { flex: 1, paddingVertical: 8 }]}
+                style={[styles.fmtBtn, matchType === 'Cup' && styles.fmtBtnActive, { flex: 1, paddingVertical: 8, paddingHorizontal: 2 }]}
                 onPress={() => setMatchType('Cup')}
               >
-                <Text style={[styles.fmtBtnText, matchType === 'Cup' && styles.fmtBtnTextActive]}>🥊 Cup Match</Text>
+                <Text style={[styles.fmtBtnText, matchType === 'Cup' && styles.fmtBtnTextActive]} numberOfLines={1}>🥊 Cup</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.fmtBtn, matchType === 'Friendly' && styles.fmtBtnActive, { flex: 1, paddingVertical: 8, paddingHorizontal: 2 }]}
+                onPress={() => setMatchType('Friendly')}
+              >
+                <Text style={[styles.fmtBtnText, matchType === 'Friendly' && styles.fmtBtnTextActive]} numberOfLines={1}>🤝 Friendly</Text>
               </TouchableOpacity>
             </View>
           </View>
