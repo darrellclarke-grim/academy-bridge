@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { generatePlayerReportCard } from '../utils/pdfGenerator';
 
 export default function PlayerProfileScreen({
   myLinkedPlayers = [],
@@ -92,10 +93,8 @@ export default function PlayerProfileScreen({
   const renderQuizExplanation = (explanation) => {
     if (!explanation) return null;
 
-    // 1. Try splitting by explicit line breaks first
     let rawBlocks = explanation.split(/\n+/).map(p => p.trim()).filter(Boolean);
 
-    // 2. If single block (no explicit line breaks from Supabase), split by header regex lookahead
     if (rawBlocks.length <= 1) {
       rawBlocks = explanation
         .split(/(?=(?:Why\s+Option\s+[A-C]|Why\s+[A-C]|Option\s+[A-C]|Why\s+it\s+fails|Why\s+this\s+fails|Why\s+this\s+works)[:\s\-\?\.]?)/gi)
@@ -107,7 +106,6 @@ export default function PlayerProfileScreen({
       <View style={styles.explanationContentBox}>
         <Text style={styles.explanationHeaderTitle}>💡 TACTICAL ANALYSIS BREAKDOWN</Text>
         {rawBlocks.map((block, index) => {
-          // Detect header patterns like "Why Option A is optimal", "Why Option B fails", "Option A:", etc.
           const headerMatch = block.match(/^(Why\s+Option\s+[A-C][^\n:]*|Why\s+[A-C][^\n:]*|Option\s+[A-C][^\n:]*|Why\s+it\s+fails|Why\s+this\s+fails|Why\s+this\s+works)[:\s\-]?/i);
 
           if (headerMatch) {
@@ -135,7 +133,6 @@ export default function PlayerProfileScreen({
             );
           }
 
-          // Fallback rendering for general non-header paragraphs
           const upperBlock = block.toUpperCase();
           const isOptimal = upperBlock.includes('OPTIMAL') || upperBlock.includes('CORRECT');
           const isFail = upperBlock.includes('FAIL') || upperBlock.includes('INCORRECT');
@@ -186,7 +183,6 @@ export default function PlayerProfileScreen({
       <View style={styles.pitchGoalBottomFrame} />
     </View>
   );
-
   const renderRadarChart = () => {
     const phy = Math.round(
       ((activePlayer?.phys_sprint || 5) +
@@ -902,10 +898,22 @@ export default function PlayerProfileScreen({
             )}
           </>
         )}
-
         {currentActiveTab === 'radar' && !isAdultFanMode && (
           <>
             {renderRadarChart()}
+
+            {/* PDF REPORT CARD EXPORT BUTTON */}
+            <TouchableOpacity 
+              style={[styles.neonBtn, { marginBottom: 15 }]} 
+              onPress={() => generatePlayerReportCard({
+                player: activePlayer,
+                teamName: 'Academy Team',
+                ageGroup: teamAgeGroup
+              })}
+            >
+              <Text style={styles.neonBtnText}>📄 Export Player Report Card (PDF)</Text>
+            </TouchableOpacity>
+
             <View style={styles.card}>
               <Text style={styles.cardTitle}>COACH OBSERVATIONS & DEVELOPMENT NOTES</Text>
               {activePlayer?.notes_weaknesses ? (

@@ -10,9 +10,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import {
-  curriculum52Weeks
-} from '../constants/curriculumData52';
+import { curriculum52Weeks } from '../constants/curriculumData52';
 import { supabase } from '../supabase';
 
 export default function CustomTrainingScreen({
@@ -23,6 +21,13 @@ export default function CustomTrainingScreen({
   const [selectedS1, setSelectedS1] = useState(null);
   const [selectedS2, setSelectedS2] = useState(null);
   const [selectedS3, setSelectedS3] = useState(null);
+
+  // Saved Plans state
+  const [savedPlans, setSavedPlans] = useState([]);
+  const [isSavePlanModalOpen, setIsSavePlanModalOpen] = useState(false);
+  const [isLoadPlanModalOpen, setIsLoadPlanModalOpen] = useState(false);
+  const [planNameInput, setPlanNameInput] = useState('');
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
 
   // Picker modal state
   const [activePickerSlot, setActivePickerSlot] = useState(null); // 's1' | 's2' | 's3' | null
@@ -40,6 +45,7 @@ export default function CustomTrainingScreen({
   useEffect(() => {
     if (activeTeamId) {
       fetchCustomVaultDrills();
+      fetchSavedPlans();
     }
   }, [activeTeamId]);
 
@@ -54,7 +60,7 @@ export default function CustomTrainingScreen({
       if (!error && data) {
         const mapped = data.map(item => ({
           id: item.id,
-          slot: 'all', // Custom vault drills available in all slots
+          slot: 'all',
           title: `[Vault] ${item.title}`,
           rpe: item.rpe_label || `RPE ${item.rpe_val}`,
           rpeVal: item.rpe_val,
@@ -68,7 +74,83 @@ export default function CustomTrainingScreen({
     }
   };
 
-  // Compile 156 drills from 52-week curriculum with explicit slot tags
+  const fetchSavedPlans = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('custom_training_plans')
+        .select('*')
+        .eq('team_id', activeTeamId)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        setSavedPlans(data);
+      }
+    } catch (err) {
+      console.error('❌ Error fetching saved training plans:', err);
+    }
+  };
+
+  const handleSavePlan = async () => {
+    if (!planNameInput.trim()) {
+      Alert.alert('Missing Name', 'Please give your training plan a name.');
+      return;
+    }
+
+    if (!selectedS1 && !selectedS2 && !selectedS3) {
+      Alert.alert('Empty Session', 'Select at least one drill before saving a plan.');
+      return;
+    }
+
+    setIsSavingPlan(true);
+    try {
+      const payload = {
+        team_id: activeTeamId,
+        plan_name: planNameInput.trim(),
+        s1_drill: selectedS1,
+        s2_drill: selectedS2,
+        s3_drill: selectedS3
+      };
+
+      const { data, error } = await supabase
+        .from('custom_training_plans')
+        .insert([payload])
+        .select();
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        setSavedPlans([data[0], ...savedPlans]);
+      }
+
+      setIsSavePlanModalOpen(false);
+      setPlanNameInput('');
+      Alert.alert('Plan Saved!', `"${payload.plan_name}" saved to your team plans.`);
+    } catch (err) {
+      Alert.alert('Save Error', err.message);
+    } finally {
+      setIsSavingPlan(false);
+    }
+  };
+
+  const handleLoadPlan = (plan) => {
+    setSelectedS1(plan.s1_drill || null);
+    setSelectedS2(plan.s2_drill || null);
+    setSelectedS3(plan.s3_drill || null);
+    setIsLoadPlanModalOpen(false);
+    Alert.alert('Plan Loaded', `Loaded "${plan.plan_name}" onto the session board.`);
+  };
+
+  const handleDeletePlan = async (planId) => {
+    try {
+      const { error } = await supabase.from('custom_training_plans').delete().eq('id', planId);
+      if (error) throw error;
+      setSavedPlans(prev => prev.filter(p => p.id !== planId));
+    } catch (err) {
+      Alert.alert('Delete Error', err.message);
+    }
+  };
+
+  // Compile 156 drills from 52-week curriculum
   const curriculumDrills = Object.keys(curriculum52Weeks).flatMap(weekNum => {
     const wData = curriculum52Weeks[weekNum];
     return [
@@ -78,14 +160,12 @@ export default function CustomTrainingScreen({
     ];
   });
 
-  // Filter drills according to active slot (S1 drills for S1 slot, S2 for S2, S3 for S3)
   const slotFilteredDrills = [...customVaultDrills, ...curriculumDrills].filter(drill => {
     if (!activePickerSlot) return true;
-    if (drill.slot === 'all') return true; // Keep custom vault drills available everywhere
+    if (drill.slot === 'all') return true;
     return drill.slot === activePickerSlot;
   });
 
-  // Group filtered drills by RPE categories
   const groupedDrills = {
     easy: slotFilteredDrills.filter(d => d.rpeVal <= 3),
     moderate: slotFilteredDrills.filter(d => d.rpeVal >= 4 && d.rpeVal <= 5),
@@ -198,60 +278,41 @@ export default function CustomTrainingScreen({
           <Text style={styles.timelineDesc}>Add close ball touches and three progressive runs.</Text>
         </View>
 
-        {/* ONE STRENGTH ROUND (WITH POSTURE TUTORIAL LINKS) */}
+        {/* ONE STRENGTH ROUND */}
         <View style={{ backgroundColor: '#ffffff', padding: 15, borderRadius: 10, marginTop: 10 }}>
           <Text style={{ color: '#0B0E14', fontSize: 15, fontWeight: 'bold', marginBottom: 10 }}>
             ONE STRENGTH ROUND
           </Text>
 
-          {/* 1. Split Squats */}
           <View style={styles.exerciseRow}>
-            <Text style={styles.exerciseText}>• 8 split squats per side</Text>
-            <TouchableOpacity
-              style={styles.formBtnPill}
-              onPress={() => openDrillVideo && openDrillVideo('https://youtu.be/hXpGSa5HYqY?si=lMHSiLsWsQtrAZgu')}
-            >
+            <Text style={styles.exerciseText}>8 split squats per side</Text>
+            <TouchableOpacity style={styles.formBtnPill} onPress={() => openDrillVideo && openDrillVideo('https://youtu.be/hXpGSa5HYqY?si=lMHSiLsWsQtrAZgu')}>
               <Text style={styles.formBtnPillText}>📹 Form</Text>
             </TouchableOpacity>
           </View>
 
-          {/* 2. Glute Bridges or Hip Hinges */}
           <View style={styles.exerciseRowMulti}>
-            <Text style={styles.exerciseText}>• 10 glute bridges or hip hinges</Text>
+            <Text style={styles.exerciseText}>10 glute bridges or hip hinges</Text>
             <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-              <TouchableOpacity
-                style={styles.formBtnPill}
-                onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/voaUxW5QXAI?si=LEExwnGfP6nF6stS')}
-              >
+              <TouchableOpacity style={styles.formBtnPill} onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/voaUxW5QXAI?si=LEExwnGfP6nF6stS')}>
                 <Text style={styles.formBtnPillText}>📹 Glute Bridge</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.formBtnPill}
-                onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/ndw0uUc2UUk?si=RQqQS5eRMohIbiDl')}
-              >
+              <TouchableOpacity style={styles.formBtnPill} onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/ndw0uUc2UUk?si=RQqQS5eRMohIbiDl')}>
                 <Text style={styles.formBtnPillText}>📹 Hip Hinge</Text>
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* 3. Calf Raises */}
           <View style={styles.exerciseRow}>
-            <Text style={styles.exerciseText}>• 12 calf raises</Text>
-            <TouchableOpacity
-              style={styles.formBtnPill}
-              onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/haHcBAd637E?si=lOR9t3siYwTkRI_g')}
-            >
+            <Text style={styles.exerciseText}>12 calf raises</Text>
+            <TouchableOpacity style={styles.formBtnPill} onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/haHcBAd637E?si=lOR9t3siYwTkRI_g')}>
               <Text style={styles.formBtnPillText}>📹 Form</Text>
             </TouchableOpacity>
           </View>
 
-          {/* 4. Side Plank */}
           <View style={styles.exerciseRow}>
-            <Text style={styles.exerciseText}>• 20-second side plank per side</Text>
-            <TouchableOpacity
-              style={styles.formBtnPill}
-              onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/BtM0a9x1F5o?si=6y0esyL3X2htSplP')}
-            >
+            <Text style={styles.exerciseText}>20-second side plank per side</Text>
+            <TouchableOpacity style={styles.formBtnPill} onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/BtM0a9x1F5o?si=6y0esyL3X2htSplP')}>
               <Text style={styles.formBtnPillText}>📹 Form</Text>
             </TouchableOpacity>
           </View>
@@ -263,7 +324,18 @@ export default function CustomTrainingScreen({
       </View>
 
       {/* 2. ASSEMBLE CUSTOM SESSION (S1 / S2 / S3) */}
-      <Text style={styles.sectionTitle}>Assemble Custom Session:</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <Text style={styles.sectionTitle}>Assemble Custom Session:</Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity style={styles.planActionBtn} onPress={() => setIsLoadPlanModalOpen(true)}>
+            <Text style={styles.planActionBtnText}>📂 Load Plan ({savedPlans.length})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.planActionBtn, { backgroundColor: '#39FF14' }]} onPress={() => setIsSavePlanModalOpen(true)}>
+            <Text style={[styles.planActionBtnText, { color: '#0B0E14' }]}>💾 Save Plan</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <View style={styles.card}>
         {/* SLOT S1 */}
         <TouchableOpacity style={styles.slotRow} onPress={() => setActivePickerSlot('s1')}>
@@ -304,7 +376,65 @@ export default function CustomTrainingScreen({
 
       <View style={{ height: 30 }} />
 
-      {/* RPE GROUPED DRILL PICKER MODAL (SLOT SPECIFIC) */}
+      {/* SAVE PLAN MODAL */}
+      <Modal visible={isSavePlanModalOpen} transparent={true} animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Save Assembled Plan</Text>
+            <Text style={styles.inputLabel}>Plan Name:</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Midfield Overload Session"
+              placeholderTextColor="#64748b"
+              value={planNameInput}
+              onChangeText={setPlanNameInput}
+            />
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleSavePlan} disabled={isSavingPlan}>
+              {isSavingPlan ? (
+                <ActivityIndicator size="small" color="#0B0E14" />
+              ) : (
+                <Text style={styles.primaryBtnText}>Save Plan to Database</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setIsSavePlanModalOpen(false)}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* LOAD PLAN MODAL */}
+      <Modal visible={isLoadPlanModalOpen} transparent={true} animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { maxHeight: '80%' }]}>
+            <Text style={styles.modalTitle}>Load Saved Plan</Text>
+            <ScrollView style={{ width: '100%', marginTop: 10 }}>
+              {savedPlans.length === 0 ? (
+                <Text style={styles.emptyGroupText}>No saved plans found for this team.</Text>
+              ) : (
+                savedPlans.map(plan => (
+                  <View key={plan.id} style={styles.savedPlanRow}>
+                    <TouchableOpacity style={{ flex: 1 }} onPress={() => handleLoadPlan(plan)}>
+                      <Text style={styles.savedPlanTitle}>{plan.plan_name}</Text>
+                      <Text style={styles.savedPlanSub}>
+                        Drills: {[plan.s1_drill?.title, plan.s2_drill?.title, plan.s3_drill?.title].filter(Boolean).join(' • ') || 'Empty'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDeletePlan(plan.id)} style={styles.deletePlanBtn}>
+                      <Text style={{ color: '#ef4444', fontSize: 12 }}>🗑️</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setIsLoadPlanModalOpen(false)}>
+              <Text style={styles.cancelBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* RPE GROUPED DRILL PICKER MODAL */}
       <Modal visible={!!activePickerSlot} transparent={true} animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { maxHeight: '85%' }]}>
@@ -316,7 +446,6 @@ export default function CustomTrainingScreen({
             </Text>
 
             <ScrollView style={{ width: '100%' }}>
-              {/* GROUP 1: RPE 2-3 EASY */}
               <TouchableOpacity
                 style={[styles.rpeGroupHeader, { borderColor: '#22c55e' }]}
                 onPress={() => setExpandedRpeSection(expandedRpeSection === 'easy' ? null : 'easy')}
@@ -338,7 +467,6 @@ export default function CustomTrainingScreen({
                 )
               )}
 
-              {/* GROUP 2: RPE 4-5 LIGHT / MODERATE */}
               <TouchableOpacity
                 style={[styles.rpeGroupHeader, { borderColor: '#3b82f6', marginTop: 10 }]}
                 onPress={() => setExpandedRpeSection(expandedRpeSection === 'moderate' ? null : 'moderate')}
@@ -360,7 +488,6 @@ export default function CustomTrainingScreen({
                 )
               )}
 
-              {/* GROUP 3: RPE 6-7 CHALLENGING */}
               <TouchableOpacity
                 style={[styles.rpeGroupHeader, { borderColor: '#eab308', marginTop: 10 }]}
                 onPress={() => setExpandedRpeSection(expandedRpeSection === 'challenging' ? null : 'challenging')}
@@ -382,7 +509,6 @@ export default function CustomTrainingScreen({
                 )
               )}
 
-              {/* GROUP 4: RPE 8+ HARD WORK */}
               <TouchableOpacity
                 style={[styles.rpeGroupHeader, { borderColor: '#ef4444', marginTop: 10 }]}
                 onPress={() => setExpandedRpeSection(expandedRpeSection === 'hard' ? null : 'hard')}
@@ -496,39 +622,16 @@ const styles = StyleSheet.create({
   timeCircleText: { color: '#0B0E14', fontWeight: 'bold', fontSize: 10 },
   timelineDesc: { color: '#ffffff', fontSize: 12, flex: 1 },
 
-  exerciseRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-  },
-  exerciseRowMulti: {
-    flexDirection: 'column',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-  },
-  exerciseText: {
-    color: '#0B0E14',
-    fontSize: 13,
-    fontWeight: '600',
-    flex: 1,
-  },
-  formBtnPill: {
-    backgroundColor: '#0B0E14',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  formBtnPillText: {
-    color: '#39FF14',
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
+  exerciseRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  exerciseRowMulti: { flexDirection: 'column', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  exerciseText: { color: '#0B0E14', fontSize: 13, fontWeight: '600', flex: 1 },
+  formBtnPill: { backgroundColor: '#0B0E14', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  formBtnPillText: { color: '#39FF14', fontSize: 11, fontWeight: 'bold' },
 
-  sectionTitle: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 8 },
+  sectionTitle: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase' },
+  planActionBtn: { backgroundColor: '#0B0E14', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#2E3A44' },
+  planActionBtnText: { color: '#39FF14', fontSize: 11, fontWeight: 'bold' },
+
   card: { backgroundColor: '#1A1F26', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#2E3A44', marginBottom: 15 },
   slotRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2E3A44' },
   slotLabel: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
@@ -542,6 +645,11 @@ const styles = StyleSheet.create({
   modalBox: { backgroundColor: '#1A1F26', width: '92%', padding: 20, borderRadius: 12, borderWidth: 1, borderColor: '#2E3A44' },
   modalTitle: { color: '#ffffff', fontSize: 18, fontWeight: 'bold', marginBottom: 4, textAlign: 'center' },
   modalSub: { color: '#94a3b8', fontSize: 12, marginBottom: 12, textAlign: 'center' },
+
+  savedPlanRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0B0E14', padding: 12, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#2E3A44' },
+  savedPlanTitle: { color: '#39FF14', fontWeight: 'bold', fontSize: 13 },
+  savedPlanSub: { color: '#94a3b8', fontSize: 11, marginTop: 2 },
+  deletePlanBtn: { padding: 6, backgroundColor: '#1A1F26', borderRadius: 6, marginLeft: 10 },
 
   rpeGroupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0B0E14', padding: 12, borderRadius: 8, borderWidth: 1 },
   rpeGroupTitle: { fontWeight: 'bold', fontSize: 13 },

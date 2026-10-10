@@ -27,7 +27,7 @@ import { ageGroupOptions, profilePositions, profileSecondaryPositions } from '..
 import { formationCategories, formationLayouts, gameStateTactics } from '../constants/tactics';
 import { seedFullTeamRoster, seedSeasonStats, testOfflineQueueFlow } from '../utils/devSeeder';
 import { enqueueOfflineEvent, flushOfflineQueue, getOfflineQueue } from '../utils/offlineQueue';
-import { generateSeasonPdfReport } from '../utils/pdfGenerator';
+import { generatePlayerReportCard, generateSeasonPdfReport } from '../utils/pdfGenerator';
 import {
   getFootednessString,
   getPosCategory,
@@ -108,6 +108,10 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState('coachHub'); 
   const [playerTab, setPlayerTab] = useState('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  // PDF Export State
+  const [isPdfExportModalOpen, setIsPdfExportModalOpen] = useState(false);
+  const [pdfExportStep, setPdfExportStep] = useState('type'); // 'type' | 'player_select'
   
   // Formation & Lineup State
   const [activeFormation, setActiveFormation] = useState('4-2-3-1');
@@ -278,20 +282,22 @@ export default function App() {
     }
     changeOrientation();
   }, [activeVideoId]);
-    // 🔗 DEEP LINK LISTENER (Auto-captures join code from WhatsApp links)
-const initialUrl = Linking.useURL();
 
-useEffect(() => {
-  if (initialUrl) {
-    const parsed = Linking.parse(initialUrl);
-    const codeParam = parsed.queryParams?.code;
-    if (codeParam) {
-      const cleanCode = String(codeParam).trim().toUpperCase();
-      setFamilyCodeInput(cleanCode);
-      setOnboardingStep('parent_notice'); // Automatically jump to Join Code step
+  // 🔗 DEEP LINK LISTENER (Auto-captures join code from WhatsApp links)
+  const initialUrl = Linking.useURL();
+
+  useEffect(() => {
+    if (initialUrl) {
+      const parsed = Linking.parse(initialUrl);
+      const codeParam = parsed.queryParams?.code;
+      if (codeParam) {
+        const cleanCode = String(codeParam).trim().toUpperCase();
+        setFamilyCodeInput(cleanCode);
+        setOnboardingStep('parent_notice'); // Automatically jump to Join Code step
+      }
     }
-  }
-}, [initialUrl]);
+  }, [initialUrl]);
+
   const openDrillVideo = (url) => {
     const videoId = getYouTubeId(url);
     if (videoId) {
@@ -300,6 +306,7 @@ useEffect(() => {
       Alert.alert("Video Error", "Invalid or missing video URL.");
     }
   };
+
   const fetchCloudData = async () => {
     try {
       const { data: drillsData } = await supabase.from('training_drills').select('*').order('id', { ascending: true });
@@ -958,6 +965,7 @@ useEffect(() => {
     setIsSavingSeason(true);
 
     try {
+      // 1. Preserve Season Calculations
       const currentYear = new Date().getFullYear();
       const seasonLabel = `Season ${currentYear - 1}/${currentYear}`;
 
@@ -969,17 +977,26 @@ useEffect(() => {
       const goalsAgainst = matchHistory.reduce((sum, m) => sum + (m.opponent_score || 0), 0);
       const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
 
+      // 2. Dynamic Award Titles (CPOTS & PPOTS / FPOTS)
+      const isAdult = String(effectiveAgeGroup).toLowerCase().includes('adult');
+      const parentAwardTitle = isAdult ? "FPOTS (Fans' Player of the Season)" : "PPOTS (Parents' Player of the Season)";
+      const coachAwardTitle = "CPOTS (Coach's Player of the Season)";
+
+      // 3. Leaderboard Calculations
       const sortedByGoals = [...teamSheet].sort((a, b) => (b.goals || 0) - (a.goals || 0));
       const sortedByAssists = [...teamSheet].sort((a, b) => (b.assists || 0) - (a.assists || 0));
-      const sortedByPotm = [...teamSheet].sort((a, b) => ((b.motm || 0) + (b.parent_motm || 0)) - ((a.motm || 0) + (a.parent_motm || 0)));
+      const sortedByCoachPotm = [...teamSheet].sort((a, b) => (b.motm || 0) - (a.motm || 0));
+      const sortedByParentPotm = [...teamSheet].sort((a, b) => (b.parent_motm || 0) - (a.parent_motm || 0));
 
       const topScorer = sortedByGoals[0]?.goals > 0 ? `${sortedByGoals[0].name} (${sortedByGoals[0].goals} Goals)` : 'N/A';
       const topAssister = sortedByAssists[0]?.assists > 0 ? `${sortedByAssists[0].name} (${sortedByAssists[0].assists} Assists)` : 'N/A';
-      const topPotm = sortedByPotm[0] ? `${sortedByPotm[0].name} (${(sortedByPotm[0].motm || 0) + (sortedByPotm[0].parent_motm || 0)} Total Awards)` : 'N/A';
+      const topCoachPotm = sortedByCoachPotm[0]?.motm > 0 ? `${sortedByCoachPotm[0].name} (${sortedByCoachPotm[0].motm} Awards)` : 'N/A';
+      const topParentPotm = sortedByParentPotm[0]?.parent_motm > 0 ? `${sortedByParentPotm[0].name} (${sortedByParentPotm[0].parent_motm} Awards)` : 'N/A';
 
+      // 4. Report Header & Honours Summary
       let reportText = `🏆 EXECUTIVE SEASON REPORT (${seasonLabel})\nTeam: ${activeTeamObj?.name || 'Squad'} (${effectiveAgeGroup})\nGenerated: ${new Date().toLocaleDateString()}\n\n`;
       reportText += `📊 TEAM RECORD:\n• Matches Played: ${totalMatches}\n• Record: ${wins}W - ${draws}D - ${losses}L (${winRate}% Win Rate)\n• Goals: ${goalsFor} Scored / ${goalsAgainst} Conceded (GD: ${goalsFor - goalsAgainst})\n\n`;
-      reportText += `⭐ INDIVIDUAL SEASON HONOURS:\n• Golden Boot: ${topScorer}\n• Playmaker Award: ${topAssister}\n• Overall POTM Leader: ${topPotm}\n\n`;
+      reportText += `⭐ INDIVIDUAL SEASON HONOURS:\n• Golden Boot: ${topScorer}\n• Playmaker Award: ${topAssister}\n• ${coachAwardTitle}: ${topCoachPotm}\n• ${parentAwardTitle}: ${topParentPotm}\n\n`;
       reportText += `👥 SQUAD MASTER STATS BREAKDOWN:\n`;
 
       teamSheet.forEach(p => {
@@ -1051,7 +1068,7 @@ useEffect(() => {
       Alert.alert("Reset Error", err.message);
     }
   };
-
+  
   const startArchiveGoalEdit = (matchRecord, eventIdx) => {
     setEditingArchiveMatch(matchRecord);
     setEditingArchiveEventIdx(eventIdx);
@@ -1526,34 +1543,34 @@ useEffect(() => {
       if (session) fetchTeamData(session.user.id, activeTeamId);
     }
   };
-  // 🚫 COACH FUNCTION: Unlink / Revoke Parent Access
-async function removeParentLinkFromPlayer(parentId, playerId, parentEmail) {
-  Alert.alert(
-    "Revoke Parent Access",
-    `Are you sure you want to remove ${parentEmail || 'this user'} from this player's profile?`,
-    [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove Access",
-        style: "destructive",
-        onPress: async () => {
-          const { error } = await supabase
-            .from('parent_players')
-            .delete()
-            .eq('parent_id', parentId)
-            .eq('player_id', playerId);
 
-          if (error) {
-            Alert.alert("Error", error.message);
-          } else {
-            Alert.alert("Access Revoked", "Parent access successfully removed.");
-            if (session) fetchTeamData(session.user.id, activeTeamId);
+  async function removeParentLinkFromPlayer(parentId, playerId, parentEmail) {
+    Alert.alert(
+      "Revoke Parent Access",
+      `Are you sure you want to remove ${parentEmail || 'this user'} from this player's profile?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove Access",
+          style: "destructive",
+          onPress: async () => {
+            const { error } = await supabase
+              .from('parent_players')
+              .delete()
+              .eq('parent_id', parentId)
+              .eq('player_id', playerId);
+
+            if (error) {
+              Alert.alert("Error", error.message);
+            } else {
+              Alert.alert("Access Revoked", "Parent access successfully removed.");
+              if (session) fetchTeamData(session.user.id, activeTeamId);
+            }
           }
         }
-      }
-    ]
-  );
-}
+      ]
+    );
+  }
 
   const finalizeDeleteTeam = async () => {
     if (deleteTeamConfirmText.trim().toLowerCase() !== 'delete team') {
@@ -2201,37 +2218,51 @@ if (session && profile && !profile.role_configured) {
         )}
 
         {/* COACH PROFILES LIST */}
-        {currentTab === 'profiles' && appMode === 'coach' && (
-          <View style={{ flex: 1 }}>
-            <View style={styles.headerRow}>
-              <View>
-                <Text style={styles.headerSub}>Development Center</Text>
-                <Text style={styles.headerTitle}>Player Profiles</Text>
-              </View>
-              <TouchableOpacity style={styles.addPlayerBtn} onPress={() => setIsAddPlayerModalOpen(true)}>
-                <Text style={styles.addPlayerBtnText}>➕ Add Player</Text>
-              </TouchableOpacity>
-            </View>
+{currentTab === 'profiles' && appMode === 'coach' && (
+  <View style={{ flex: 1 }}>
+    <View style={styles.headerRow}>
+      <View>
+        <Text style={styles.headerSub}>Development Center</Text>
+        <Text style={styles.headerTitle}>Player Profiles</Text>
+      </View>
+      <TouchableOpacity style={styles.addPlayerBtn} onPress={() => setIsAddPlayerModalOpen(true)}>
+        <Text style={styles.addPlayerBtnText}>➕ Add Player</Text>
+      </TouchableOpacity>
+    </View>
 
-            <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
-              {(teamSheet || []).map(p => p && (
-                <TouchableOpacity key={p.id} style={styles.card} onPress={() => setEditingPlayer(p)}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View>
-                      <Text style={styles.roleTitle}>#{p.squad_number || '0'} {p.name}</Text>
-                      <Text style={styles.roleSubTitle}>
-                        Primary: <Text style={{ color: '#39FF14' }}>{p.position || 'TBD'}</Text> | Secondary: <Text style={{ color: '#3b82f6' }}>{p.secondary_position || 'None'}</Text>
-                      </Text>
-                    </View>
-                    <View style={styles.editProfileBtn}>
-                      <Text style={styles.editProfileBtnText}>View/Edit Profile</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+    <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
+      {(teamSheet || []).map(p => p && (
+        <TouchableOpacity key={p.id} style={styles.card} onPress={() => setEditingPlayer(p)}>
+          {/* HEADER ROW: Name on Left, Edit Profile Button on Right */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <Text style={[styles.roleTitle, { flex: 1, marginRight: 10 }]} numberOfLines={1}>
+              #{p.squad_number || '0'} {p.name}
+            </Text>
+            <View style={styles.editProfileBtn}>
+              <Text style={styles.editProfileBtnText}>Edit Profile</Text>
+            </View>
           </View>
-        )}
+
+          {/* COMPACT PLAYER SUMMARY BOX */}
+          <View style={{ backgroundColor: '#0B0E14', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44' }}>
+            <Text style={[styles.roleSubTitle, { marginBottom: 4 }]}>
+              Primary: <Text style={{ color: '#39FF14' }}>{p.position || 'TBD'}</Text> | Secondary: <Text style={{ color: '#3b82f6' }}>{p.secondary_position || 'None'}</Text>
+            </Text>
+            
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+              <Text style={{ color: '#cbd5e1', fontSize: 11 }}>
+                Apps: <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>{p.apps || 0}</Text> | Mins: <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>{p.total_minutes_played || 0}'</Text>
+              </Text>
+              <Text style={{ color: '#cbd5e1', fontSize: 11 }}>
+                Goals: <Text style={{ color: '#39FF14', fontWeight: 'bold' }}>{p.goals || 0}</Text> | Assists: <Text style={{ color: '#3b82f6', fontWeight: 'bold' }}>{p.assists || 0}</Text>
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  </View>
+)}
 
         {/* COACH HUB */}
         {currentTab === 'coachHub' && (
@@ -2999,6 +3030,93 @@ if (session && profile && !profile.role_configured) {
         </View>
       </Modal>
 
+      {/* UNIFIED PDF EXPORT MODAL */}
+      <Modal
+        visible={isPdfExportModalOpen}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setIsPdfExportModalOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            {pdfExportStep === 'type' ? (
+              <>
+                <Text style={styles.modalTitle}>📄 EXPORT BRANDED PDF</Text>
+                <Text style={{ color: '#94A3B8', fontSize: 12, marginBottom: 15, textAlign: 'center' }}>Select the report format to generate:</Text>
+
+                <TouchableOpacity
+                  style={styles.inviteRow}
+                  onPress={() => {
+                    setIsPdfExportModalOpen(false);
+                    exportMatchdaySummary();
+                  }}
+                >
+                  <View>
+                    <Text style={styles.inviteName}>🏆 Full Team Season Report</Text>
+                    <Text style={[styles.inviteCodeText, { color: '#64748B', marginTop: 2, fontWeight: 'normal' }]}>Complete team record, honours, squad stats</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.inviteRow}
+                  onPress={() => setPdfExportStep('player_select')}
+                >
+                  <View>
+                    <Text style={styles.inviteName}>👤 Individual Player Report</Text>
+                    <Text style={[styles.inviteCodeText, { color: '#64748B', marginTop: 2, fontWeight: 'normal' }]}>360° matrix, match stats, and notes</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.cancelBtn, { marginTop: 10 }]}
+                  onPress={() => setIsPdfExportModalOpen(false)}
+                >
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <Text style={styles.modalTitle}>Select Player</Text>
+                  <TouchableOpacity onPress={() => setPdfExportStep('type')}>
+                    <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 12 }}>⬅ Back</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView style={{ maxHeight: 300, width: '100%' }}>
+                  {(teamSheet || []).map((p) => (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={styles.inviteRow}
+                      onPress={async () => {
+                        setIsPdfExportModalOpen(false);
+                        const currentTeam = myTeams.find(t => t.id === activeTeamId);
+                        await generatePlayerReportCard({
+                          player: p,
+                          teamName: currentTeam?.name || activeTeamObj?.name || 'Tactical Engine Squad',
+                          ageGroup: currentTeam?.age_group || effectiveAgeGroup || 'Youth',
+                          clubLogoUrl: currentTeam?.logo_url || teamLogoUrl || null
+                        });
+                      }}
+                    >
+                      <Text style={styles.inviteName}>#{p.squad_number || 0} {p.name}</Text>
+                      <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 12 }}>{p.position || 'CM'} ➔</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                <TouchableOpacity
+                  style={[styles.cancelBtn, { marginTop: 10 }]}
+                  onPress={() => setIsPdfExportModalOpen(false)}
+                >
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {/* COMMAND MENU SIDEBAR DRAWER */}
       <Modal visible={isSidebarOpen} transparent={true} animationType="fade">
         <View style={styles.sidebarOverlay}>
@@ -3064,7 +3182,7 @@ if (session && profile && !profile.role_configured) {
                     </>
                   )}
 
-                  <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={exportMatchdaySummary}>
+                  <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setPdfExportStep('type'); setIsPdfExportModalOpen(true); }}>
                     <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>📄 Export Branded PDF Report</Text>
                   </TouchableOpacity>
 

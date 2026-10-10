@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function CoachHubScreen({
@@ -22,6 +23,39 @@ export default function CoachHubScreen({
 
   // Strict Alphabetical Sorting for stationary RSVP list
   const sortedTeamSheet = [...(teamSheet || [])].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  // Cumulative Parent Vote Leaderboard Calculation
+  const parentVoteLeaderboard = useMemo(() => {
+    const voteCounts = {};
+    const potmAwards = {};
+    let totalSeasonVotes = 0;
+
+    (matchHistory || []).forEach(match => {
+      if (match.parentVotes && typeof match.parentVotes === 'object') {
+        Object.entries(match.parentVotes).forEach(([playerId, count]) => {
+          voteCounts[playerId] = (voteCounts[playerId] || 0) + Number(count);
+          totalSeasonVotes += Number(count);
+        });
+      }
+
+      if (match.parentPotmId) {
+        potmAwards[match.parentPotmId] = (potmAwards[match.parentPotmId] || 0) + 1;
+      }
+    });
+
+    return (teamSheet || [])
+      .map(player => {
+        const votes = voteCounts[player.id] || 0;
+        const share = totalSeasonVotes > 0 ? ((votes / totalSeasonVotes) * 100).toFixed(1) : '0.0';
+        return {
+          ...player,
+          rawVotes: votes,
+          potmAwards: potmAwards[player.id] || 0,
+          voteShare: share
+        };
+      })
+      .sort((a, b) => b.rawVotes - a.rawVotes || b.potmAwards - a.potmAwards);
+  }, [matchHistory, teamSheet]);
 
   return (
     <View style={styles.container}>
@@ -83,6 +117,39 @@ export default function CoachHubScreen({
           )}
         </View>
 
+        {/* CUMULATIVE PARENT VOTE LEADERBOARD */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>👪 PARENT VOTE LEADERBOARD</Text>
+            <Text style={{ color: '#94A3B8', fontSize: 11, fontWeight: 'bold' }}>Season Total</Text>
+          </View>
+
+          {parentVoteLeaderboard.map((player, index) => {
+            const rankColor = index === 0 ? '#EAB308' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : '#2E3A44';
+
+            return (
+              <View key={player.id} style={styles.leaderboardRow}>
+                <View style={[styles.rankBadge, { backgroundColor: rankColor }]}>
+                  <Text style={styles.rankText}>#{index + 1}</Text>
+                </View>
+
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.playerName}>#{player.squad_number || 0} {player.name}</Text>
+                  <Text style={styles.playerSubtext}>
+                    {player.potmAwards}x Parent POTM • {player.voteShare}% of total votes
+                  </Text>
+                </View>
+
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={styles.voteCount}>
+                    {player.rawVotes} <Text style={{ fontSize: 10, color: '#94A3B8' }}>votes</Text>
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+
         {/* TOUCHLINE GAME-STATE CONTROLLER */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>⚡ TOUCHLINE GAME-STATE CONTROLLER</Text>
@@ -104,8 +171,8 @@ export default function CoachHubScreen({
             {selectedGameState === 'leading' ? 'PROTECT & PUNISH (Leading)' : selectedGameState === 'losing' ? 'HIGH PRESS CHASE (Losing)' : 'BALANCED PATIENCE (Level)'}
           </Text>
 
-          <Text style={styles.bulletText}>• Maintain structural balance between lines.</Text>
-          <Text style={styles.bulletText}>• Recognize when to accelerate attack vs reset play.</Text>
+          <Text style={styles.bulletText}>Maintain structural balance between lines.</Text>
+          <Text style={styles.bulletText}>Recognize when to accelerate attack vs reset play.</Text>
 
           <Text style={styles.shoutText}>
             📢 Touchline Shout: "See early, decide early! Keep trusting the connections!"
@@ -117,7 +184,6 @@ export default function CoachHubScreen({
           <View style={styles.card}>
             <Text style={styles.cardTitle}>👨‍👩‍👦 MY LINKED FAMILY PLAYER</Text>
             
-            {/* Child Selector Tabs if multiple linked */}
             {myLinkedPlayers.length > 1 && (
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
                 {myLinkedPlayers.map(child => (
@@ -182,6 +248,21 @@ const styles = StyleSheet.create({
   rsvpChipIn: { backgroundColor: 'rgba(34, 197, 94, 0.15)', borderColor: '#22C55E' },
   rsvpChipOut: { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#EF4444' },
   rsvpChipText: { fontSize: 11, fontWeight: 'bold', color: '#FFFFFF' },
+  leaderboardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0B0E14',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#2E3A44'
+  },
+  rankBadge: { width: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center' },
+  rankText: { color: '#000000', fontWeight: 'bold', fontSize: 11 },
+  playerName: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 13 },
+  playerSubtext: { color: '#94A3B8', fontSize: 11, marginTop: 2 },
+  voteCount: { color: '#39FF14', fontWeight: 'bold', fontSize: 14 },
   stateBtnRow: { flexDirection: 'row', gap: 8, marginVertical: 12 },
   stateBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#0B0E14', borderWidth: 1, borderColor: '#2E3A44', alignItems: 'center' },
   stateBtnActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },

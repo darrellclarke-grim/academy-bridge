@@ -2,34 +2,34 @@ import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { formationCategories, formationCategories9v9, formationLayouts } from '../constants/tactics';
 import { supabase } from '../supabase';
 
-// Position Remapping Hierarchy Matrix
+// Position Remapping Hierarchy Matrix (Updated for 11v11 & 9v9)
 const REMAP_PRIORITIES = {
   'LF': ['LW', 'LF', 'LM', 'ST', 'CAM'],
   'RF': ['RW', 'RF', 'RM', 'ST', 'CAM'],
-  'LW': ['LF', 'LW', 'LM', 'ST', 'CAM'],
-  'RW': ['RF', 'RW', 'RM', 'ST', 'CAM'],
-  'LM': ['LW', 'LF', 'LM', 'LCM', 'CM'],
-  'RM': ['RW', 'RF', 'RM', 'RCM', 'CM'],
-  'CDM': ['CDM', 'LDM', 'RDM', 'CM', 'LCM', 'RCM', 'CB'],
+  'LW': ['LF', 'LW', 'LM', 'ST', 'LS', 'CAM'],
+  'RW': ['RF', 'RW', 'RM', 'ST', 'RS', 'CAM'],
+  'LM': ['LW', 'LF', 'LM', 'LCM', 'CM', 'LWB'],
+  'RM': ['RW', 'RF', 'RM', 'RCM', 'CM', 'RWB'],
+  'CDM': ['CDM', 'CM', 'LCM', 'RCM', 'LDM', 'RDM', 'CB', 'LCB', 'RCB'],
   'LDM': ['CDM', 'LDM', 'CM', 'LCM', 'CB'],
   'RDM': ['CDM', 'RDM', 'CM', 'RCM', 'CB'],
-  'CAM': ['CAM', 'CF', 'LAM', 'RAM', 'CM', 'LCM', 'RCM', 'ST', 'LW', 'RW'],
+  'CAM': ['CAM', 'CF', 'LAM', 'RAM', 'CM', 'LCM', 'RCM', 'ST', 'LS', 'RS'],
   'LAM': ['CAM', 'LAM', 'LW', 'LM', 'CM'],
   'RAM': ['CAM', 'RAM', 'RW', 'RM', 'CM'],
-  'CF': ['CAM', 'CF', 'ST', 'CM'],
-  'LCM': ['LCM', 'CM', 'CDM', 'CAM', 'LM'],
-  'RCM': ['RCM', 'CM', 'CDM', 'CAM', 'RM'],
+  'CF': ['CAM', 'CF', 'ST', 'LS', 'RS', 'CM'],
+  'LCM': ['LCM', 'CM', 'CDM', 'CAM', 'LM', 'LCB'],
+  'RCM': ['RCM', 'CM', 'CDM', 'CAM', 'RM', 'RCB'],
   'CM': ['CM', 'LCM', 'RCM', 'CDM', 'CAM'],
-  'LWB': ['LWB', 'LB', 'LM'],
-  'RWB': ['RWB', 'RB', 'RM'],
-  'LB': ['LB', 'LWB', 'LCB', 'CB'],
-  'RB': ['RB', 'RWB', 'RCB', 'CB'],
-  'LCB': ['LCB', 'CB', 'LB', 'CDM'],
-  'RCB': ['RCB', 'CB', 'RB', 'CDM'],
+  'LWB': ['LWB', 'LB', 'LM', 'LW', 'LCB'],
+  'RWB': ['RWB', 'RB', 'RM', 'RW', 'RCB'],
+  'LB': ['LB', 'LWB', 'LCB', 'CB', 'LM'],
+  'RB': ['RB', 'RWB', 'RCB', 'CB', 'RM'],
+  'LCB': ['LCB', 'CB', 'LB', 'CDM', 'LCM'],
+  'RCB': ['RCB', 'CB', 'RB', 'CDM', 'RCM'],
   'CB': ['CB', 'LCB', 'RCB', 'CDM'],
-  'ST': ['ST', 'CF', 'LS', 'RS', 'CAM'],
-  'LS': ['ST', 'LS', 'CF'],
-  'RS': ['ST', 'RS', 'CF'],
+  'ST': ['ST', 'LS', 'RS', 'CF', 'CAM', 'LW', 'RW'],
+  'LS': ['LS', 'ST', 'RS', 'CF', 'CAM'],
+  'RS': ['RS', 'ST', 'LS', 'CF', 'CAM'],
   'GK': ['GK', 'SGK'],
   'SGK': ['GK', 'SGK']
 };
@@ -45,20 +45,18 @@ export default function FormationModal({
   activeTeamId,
   setMyTeams
 }) {
-  // ⚡ Declared here so it's accessible everywhere inside this component
   const is9v9 = ['U11', 'U12', 'U13'].includes(String(ageGroup || '').toUpperCase());
   const activeCategories = is9v9 ? formationCategories9v9 : formationCategories;
 
-  // Smart Formation Switcher that remaps starters gracefully
   const handleSelectFormation = async (newFormation) => {
     setActiveFormation(newFormation);
 
-    // 1. Update local team memory immediately
+    // 1. Update local team default formation
     if (activeTeamId && setMyTeams) {
       setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, default_formation: newFormation } : t));
     }
 
-    // 2. Persist choice to Supabase
+    // 2. Persist chosen formation to Supabase
     if (activeTeamId) {
       try {
         await supabase.from('teams').update({ default_formation: newFormation }).eq('id', activeTeamId);
@@ -72,25 +70,57 @@ export default function FormationModal({
     const occupiedSlots = new Set();
     const dbUpdates = [];
 
-    const updatedSheet = teamSheet.map(p => {
-      if (!p.is_starter || !p.available) return p;
+    // Filter starting pitch players needing remapping
+    const startersToMap = teamSheet.filter(p => p.is_starter && p.available);
+    const unmappedPlayers = [];
 
+    // Pass 1: Exact or Preferred Remap
+    const remappedMap = new Map();
+    startersToMap.forEach(p => {
       const currentPos = String(p.matchday_position || '').toUpperCase();
 
+      // Check exact match
       if (availableSlotCodes.includes(currentPos) && !occupiedSlots.has(currentPos)) {
         occupiedSlots.add(currentPos);
-        return p;
+        remappedMap.set(p.id, currentPos);
+        return;
       }
 
+      // Check hierarchy priorities
       const priorityList = REMAP_PRIORITIES[currentPos] || [currentPos];
       const remappedSlot = priorityList.find(candidate => availableSlotCodes.includes(candidate) && !occupiedSlots.has(candidate));
 
       if (remappedSlot) {
         occupiedSlots.add(remappedSlot);
-        dbUpdates.push(supabase.from('players').update({ matchday_position: remappedSlot }).eq('id', p.id));
-        return { ...p, matchday_position: remappedSlot };
+        remappedMap.set(p.id, remappedSlot);
+      } else {
+        unmappedPlayers.push(p);
+      }
+    });
+
+    // Pass 2: Roster Surplus Fallback (keep starters on pitch if any slot remains open)
+    unmappedPlayers.forEach(p => {
+      const remainingSlot = availableSlotCodes.find(code => !occupiedSlots.has(code));
+      if (remainingSlot) {
+        occupiedSlots.add(remainingSlot);
+        remappedMap.set(p.id, remainingSlot);
+      }
+    });
+
+    // Build final updated team sheet
+    const updatedSheet = teamSheet.map(p => {
+      if (!p.is_starter || !p.available) return p;
+
+      const newPos = remappedMap.get(p.id);
+
+      if (newPos) {
+        if (newPos !== p.matchday_position) {
+          dbUpdates.push(supabase.from('players').update({ matchday_position: newPos }).eq('id', p.id));
+        }
+        return { ...p, matchday_position: newPos };
       }
 
+      // Bench player if no open slot exists on pitch
       dbUpdates.push(supabase.from('players').update({ matchday_position: 'Bench', is_starter: false }).eq('id', p.id));
       return { ...p, matchday_position: 'Bench', is_starter: false };
     });
