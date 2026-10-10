@@ -231,6 +231,36 @@ export default function App() {
   const activeTeamObj = myTeams.find(t => t.id === activeTeamId) || {};
   const effectiveAgeGroup = activeTeamObj?.age_group || teamAgeGroup || 'U16';
   const isAdultTeam = String(effectiveAgeGroup).toLowerCase().includes('adult');
+// 🛡️ SUPERUSER ROLE LOCKDOWN (Darrell.Clarke@me.com)
+  const isSuperUser = 
+    profile?.role === 'superuser' || 
+    session?.user?.email?.toLowerCase() === 'darrell.clarke@me.com';
+
+  // STRICT ROLE ENFORCEMENT
+  useEffect(() => {
+    if (!profile || !profile.role_configured) return;
+
+    const role = profile.role;
+
+    if (isSuperUser || role === 'superuser') return;
+
+    if (role === 'coach' || role === 'assistant') {
+      if (appMode !== 'coach') {
+        setAppMode('coach');
+        setCurrentTab('coachHub');
+      }
+    } else if (role === 'parent') {
+      if (appMode !== 'parent') {
+        setAppMode('parent');
+        setCurrentTab('player');
+      }
+    } else if (role === 'player') {
+      if (appMode !== 'player') {
+        setAppMode('player');
+        setCurrentTab('player');
+      }
+    }
+  }, [profile, appMode, isSuperUser]);
 
   const activeLayout = formationLayouts[activeFormation] || formationLayouts['4-2-3-1'];
   const currentAvailablePositions = activeLayout.map(node => node.code);
@@ -681,14 +711,7 @@ export default function App() {
     setActiveSubRole(null); 
   }, [activePlayerId, viewingRoleToggle, playerTab]);
 
-  useEffect(() => {
-    if (profile && profile.role !== 'coach' && profile.role !== 'assistant' && appMode === 'coach') {
-      setAppMode('parent');
-      setCurrentTab('player');
-    }
-  }, [profile, appMode]);
-
-  useEffect(() => {
+    useEffect(() => {
     if (appMode === 'parent' && isAdultTeam && playerTab !== 'overview') {
       setPlayerTab('overview');
     }
@@ -1464,29 +1487,55 @@ export default function App() {
 
   async function linkChildFlow() {
     Keyboard.dismiss();
-    if (!familyCodeInput) return;
-    const cleanCode = familyCodeInput.trim().toUpperCase();
-
-    if (cleanCode.startsWith('STAF-')) {
-      const { data: team } = await supabase.from('teams').select('*').eq('staff_code', cleanCode).single();
-      if (team) {
-        await supabase.from('profiles').update({ role: 'assistant', role_configured: true }).eq('id', session.user.id);
-        setAppMode('coach');
-        setActiveTeamId(team.id);
-        fetchUserProfile(session.user.id);
-        return;
-      }
+    if (!familyCodeInput.trim()) {
+      setAuthMessage({ text: 'Please enter a valid Join Code provided by your coach.', type: 'error' });
+      return;
     }
 
-    const { data: player } = await supabase.from('players').select('*').eq('family_code', cleanCode).single();
-    if (player) {
-      await supabase.from('parent_players').insert([{ player_id: player.id, parent_id: session.user.id, is_primary: true }]);
-      await supabase.from('profiles').update({ role: 'parent', role_configured: true }).eq('id', session.user.id);
-      setMyChildId(player.id);
-      if (player.team_id) setActiveTeamId(player.team_id);
-      fetchUserProfile(session.user.id);
-    } else {
-      setAuthMessage({ text: 'Invalid Invite Code.', type: 'error' });
+    const cleanCode = familyCodeInput.trim().toUpperCase();
+    setLoading(true);
+
+    try {
+      // 1. Staff Code (Assistant Coach)
+      if (cleanCode.startsWith('STAF-')) {
+        const { data: team } = await supabase.from('teams').select('*').eq('staff_code', cleanCode).single();
+        if (team) {
+          await supabase.from('profiles').update({ role: 'assistant', role_configured: true }).eq('id', session.user.id);
+          setAppMode('coach');
+          setActiveTeamId(team.id);
+          await fetchUserProfile(session.user.id);
+          return;
+        }
+      }
+
+      // 2. Player Family Code (Parent)
+      const { data: player } = await supabase.from('players').select('*').eq('family_code', cleanCode).single();
+      if (player) {
+        await supabase.from('parent_players').insert([{ player_id: player.id, parent_id: session.user.id, is_primary: true }]);
+        await supabase.from('profiles').update({ role: 'parent', role_configured: true }).eq('id', session.user.id);
+        setMyChildId(player.id);
+        if (player.team_id) setActiveTeamId(player.team_id);
+        setAppMode('parent');
+        await fetchUserProfile(session.user.id);
+        return;
+      }
+
+      // 3. Team Fan / Invite Code
+      const { data: fanTeam } = await supabase.from('teams').select('*').eq('invite_code', cleanCode).single();
+      if (fanTeam) {
+        await supabase.from('profiles').update({ role: 'parent', role_configured: true }).eq('id', session.user.id);
+        setActiveTeamId(fanTeam.id);
+        setAppMode('parent');
+        await fetchUserProfile(session.user.id);
+        return;
+      }
+
+      // BLOCK ENTRANCE IF INVALID CODE
+      setAuthMessage({ text: '❌ Invalid Join Code. Please request a valid code from your coach.', type: 'error' });
+    } catch (err) {
+      setAuthMessage({ text: 'Error verifying join code. Please try again.', type: 'error' });
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -2110,32 +2159,39 @@ if (session && profile && !profile.role_configured) {
   return (
     <SafeAreaView style={styles.container}>
       
-      {/* TOP HEADER BAR (CASE-INSENSITIVE DYNAMIC FAN/PARENT TOGGLE) */}
+      {/* TOP HEADER BAR */}
       <View style={styles.masterToggleBar}>
         <TouchableOpacity style={styles.menuTriggerBtn} onPress={() => setIsSidebarOpen(true)}>
           <Text style={styles.menuTriggerIcon}>☰</Text>
         </TouchableOpacity>
 
-        <View style={styles.toggleCenterGroup}>
-          {(profile?.role === 'coach' || profile?.role === 'assistant') && (
+        {/* MODE TOGGLE: EXCLUSIVELY VISIBLE TO SUPERUSER (Darrell.Clarke@me.com) */}
+        {isSuperUser ? (
+          <View style={styles.toggleCenterGroup}>
             <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'coach' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('coach')}>
-              <Text style={[styles.masterToggleBtnText, appMode === 'coach' && styles.masterToggleBtnTextActive]}>
-                {profile?.role === 'assistant' ? 'STAFF' : 'COACH'}
-              </Text>
+              <Text style={[styles.masterToggleBtnText, appMode === 'coach' && styles.masterToggleBtnTextActive]}>COACH</Text>
             </TouchableOpacity>
-          )}
-          <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'parent' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('parent')}>
-            <Text style={[styles.masterToggleBtnText, appMode === 'parent' && styles.masterToggleBtnTextActive]}>
-              {isAdultTeam ? 'FAN' : 'PARENT'}
+            <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'parent' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('parent')}>
+              <Text style={[styles.masterToggleBtnText, appMode === 'parent' && styles.masterToggleBtnTextActive]}>PARENT</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'player' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('player')}>
+              <Text style={[styles.masterToggleBtnText, appMode === 'player' && styles.masterToggleBtnTextActive]}>PLAYER</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={{ alignItems: 'center' }}>
+            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 14 }}>
+              {activeTeamObj?.name || 'Tactical Engine'}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'player' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('player')}>
-            <Text style={[styles.masterToggleBtnText, appMode === 'player' && styles.masterToggleBtnTextActive]}>PLAYER</Text>
-          </TouchableOpacity>
-        </View>
+            <Text style={{ color: '#39FF14', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' }}>
+              {profile?.role === 'coach' ? 'Head Coach' : profile?.role === 'assistant' ? 'Assistant Coach' : profile?.role === 'parent' ? (isAdultTeam ? 'Fan View' : 'Parent View') : 'Player View'}
+            </Text>
+          </View>
+        )}
+
         <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
-  <Text style={styles.signOutBtnText}>Log Out</Text>
-</TouchableOpacity>
+          <Text style={styles.signOutBtnText}>Log Out</Text>
+        </TouchableOpacity>
       </View>
 
       {/* MULTI-TEAM HORIZONTAL SELECTOR BAR */}
