@@ -29,9 +29,9 @@
       "package": "com.yourclub.tacticalplaybook"
     },
     "web": {
-      "favicon": "./assets/favicon.png",
+      "favicon": "./assets/icon.png",
       "name": "Tactical Engine",
-      "shortName": "TacticalEngine",
+      "shortName": "Tactical Engine",
       "themeColor": "#0B0E14",
       "backgroundColor": "#0B0E14",
       "display": "standalone",
