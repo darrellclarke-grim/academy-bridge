@@ -28,6 +28,15 @@
       },
       "package": "com.yourclub.tacticalplaybook"
     },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "name": "Tactical Engine Coaching",
+      "shortName": "TacticalEngine",
+      "themeColor": "#0B0E14",
+      "backgroundColor": "#0B0E14",
+      "display": "standalone",
+      "orientation": "portrait"
+    },
     "extra": {
       "eas": {
         "projectId": "60186a0a-1281-42c3-b417-a5684e2bab85"
