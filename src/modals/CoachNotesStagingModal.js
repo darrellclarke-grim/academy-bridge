@@ -36,7 +36,7 @@ export default function CoachNotesStagingModal({
     setSelectedPlayer(player);
     setDraftWeaknesses(player?.draft_notes_weaknesses || player?.notes_weaknesses || '');
     setDraftCommunication(player?.draft_notes_communication || player?.notes_communication || '');
-    setDraftGeneralNotes(player?.draft_coach_notes || player?.coach_development_notes || player?.notes_notes || '');
+    setDraftGeneralNotes(player?.draft_coach_notes || player?.coach_development_notes || '');
   };
 
   const handleSaveDraft = async () => {
@@ -82,7 +82,6 @@ export default function CoachNotesStagingModal({
                 notes_weaknesses: draftWeaknesses,
                 notes_communication: draftCommunication,
                 coach_development_notes: draftGeneralNotes,
-                notes_notes: draftGeneralNotes,
                 draft_notes_weaknesses: draftWeaknesses,
                 draft_notes_communication: draftCommunication,
                 draft_coach_notes: draftGeneralNotes,
