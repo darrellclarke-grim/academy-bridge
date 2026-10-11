@@ -4,6 +4,7 @@ export default function InviteModal({
   visible,
   onClose,
   appMode,
+  userRole,
   activeTeamObj,
   teamSheet,
   teamAgeGroup,
@@ -12,18 +13,25 @@ export default function InviteModal({
   shareFanInvite,
   shareCoParentInvite
 }) {
+  const isCoach = appMode === 'coach' || userRole === 'coach' || userRole === 'assistant' || userRole === 'admin';
+  const isPlayer = userRole === 'player' || appMode === 'player';
+
   return (
     <Modal visible={visible} transparent={true} animationType="slide">
       <View style={[styles.modalOverlayFull, { justifyContent: 'center', alignItems: 'center' }]}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        <View style={[styles.modalBoxFull, { maxHeight: '80%' }]}>
-          <Text style={styles.modalTitle}>Team Invite Codes</Text>
+        <View style={[styles.modalBoxFull, { maxHeight: '85%' }]}>
+          <Text style={styles.modalTitle}>Team Invite & Join Codes</Text>
 
-          {appMode === 'coach' ? (
-            <>
-              <View style={[styles.card, { borderColor: '#3b82f6', marginBottom: 15 }]}>
-                <Text style={[styles.cardTitle, { color: '#3b82f6' }]}>📋 Assistant Coach / Staff Join Code</Text>
-                <Text style={styles.bulletText}>Share this code with assistant coaches or team managers to grant them full admin control on matchday:</Text>
+          {isCoach ? (
+            <ScrollView style={{ width: '100%' }} keyboardShouldPersistTaps="handled">
+              {/* STAFF & ADMINISTRATIVE CODES */}
+              <Text style={styles.sectionHeaderModal}>Staff & Administrative Codes</Text>
+              
+              {/* Assistant Coach Code */}
+              <View style={[styles.card, { borderColor: '#3b82f6', marginBottom: 12 }]}>
+                <Text style={[styles.cardTitle, { color: '#3b82f6' }]}>📋 Assistant Coach Code</Text>
+                <Text style={styles.bulletText}>Share this code with assistant coaches to grant tactical, lineup, and matchday access:</Text>
                 <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: 'bold', marginVertical: 8, letterSpacing: 2 }}>
                   {activeTeamObj?.staff_code || 'STAF-PENDING'}
                 </Text>
@@ -31,37 +39,82 @@ export default function InviteModal({
                   <Text style={styles.inviteShareBtnText}>Share Staff Code</Text>
                 </TouchableOpacity>
               </View>
-              
-              <Text style={styles.sectionHeaderModal}>Player & Family Invite Codes</Text>
-              <ScrollView style={{ width: '100%' }} keyboardShouldPersistTaps="handled">
-                {(teamSheet || []).map(p => (
-                  <View key={p.id} style={styles.inviteRow}>
-                    <View>
-                      <Text style={styles.inviteName}>#{p.squad_number || ''} {p.name}</Text>
-                      <Text style={styles.inviteCodeText}>Code: {p.family_code}</Text>
-                    </View>
-                    <TouchableOpacity style={styles.inviteShareBtn} onPress={() => teamAgeGroup === 'Adult' ? shareFanInvite(p.name, p.family_code) : shareCoParentInvite(p.name, p.family_code)}>
-                      <Text style={styles.inviteShareBtnText}>Share</Text>
-                    </TouchableOpacity>
+
+              {/* Administrator Code */}
+              <View style={[styles.card, { borderColor: '#a855f7', marginBottom: 12 }]}>
+                <Text style={[styles.cardTitle, { color: '#a855f7' }]}>📂 Administrator Code</Text>
+                <Text style={styles.bulletText}>Share this code with club administrators to grant roster setup and profile access:</Text>
+                <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: 'bold', marginVertical: 8, letterSpacing: 2 }}>
+                  {activeTeamObj?.admin_code || 'ADMN-PENDING'}
+                </Text>
+                <TouchableOpacity style={[styles.inviteShareBtn, { backgroundColor: '#a855f7' }]} onPress={() => shareStaffInvite(activeTeamObj?.name, activeTeamObj?.admin_code)}>
+                  <Text style={styles.inviteShareBtnText}>Share Admin Code</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Team Fan Code */}
+              <View style={[styles.card, { borderColor: '#eab308', marginBottom: 15 }]}>
+                <Text style={[styles.cardTitle, { color: '#eab308' }]}>📣 General Team Fan Code</Text>
+                <Text style={styles.bulletText}>Share this code with supporters for read-only live match scores and POTM voting:</Text>
+                <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: 'bold', marginVertical: 8, letterSpacing: 2 }}>
+                  {activeTeamObj?.fan_code || 'FAN-PENDING'}
+                </Text>
+                <TouchableOpacity style={[styles.inviteShareBtn, { backgroundColor: '#eab308' }]} onPress={() => shareFanInvite(activeTeamObj?.name, activeTeamObj?.fan_code)}>
+                  <Text style={styles.inviteShareBtnText}>Share Fan Code</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Player & Family Invite Codes */}
+              <Text style={styles.sectionHeaderModal}>Player & Family Invite Codes (FAM-)</Text>
+              {(teamSheet || []).map(p => (
+                <View key={p.id} style={styles.inviteRow}>
+                  <View>
+                    <Text style={styles.inviteName}>#{p.squad_number || ''} {p.name}</Text>
+                    <Text style={styles.inviteCodeText}>Code: {p.family_code || 'FAM-PENDING'}</Text>
                   </View>
-                ))}
-              </ScrollView>
-            </>
-          ) : (
-            <View style={[styles.card, { borderColor: '#3b82f6' }]}>
-              <Text style={styles.cardTitle}>{teamAgeGroup === 'Adult' ? '📣 My Fan Invite Code' : '👨‍👩‍👦 Co-Parent / Guardian Code'}</Text>
+                  <TouchableOpacity style={styles.inviteShareBtn} onPress={() => teamAgeGroup === 'Adult' ? shareFanInvite(p.name, p.family_code) : shareCoParentInvite(p.name, p.family_code)}>
+                    <Text style={styles.inviteShareBtnText}>Share</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          ) : isPlayer ? (
+            <View style={[styles.card, { borderColor: '#2E3A44' }]}>
+              <Text style={[styles.cardTitle, { color: '#94a3b8' }]}>ℹ️ Player Account</Text>
               <Text style={styles.bulletText}>
-                {teamAgeGroup === 'Adult' 
-                  ? `Share this secure code with up to 2 fans to let them follow ${activePlayer?.name || 'your'} live match events and vote for POTM.`
-                  : `Share this secure code with another guardian to give them parent access to ${activePlayer?.name || 'your child'}'s profile.`}
+                Join codes and fan invites can only be shared by Coaching Staff or Parents/Guardians.
               </Text>
-              <Text style={{ color: '#ffffff', fontSize: 22, fontWeight: 'bold', marginVertical: 15, textAlign: 'center', letterSpacing: 3 }}>
-                {activePlayer?.family_code || 'FAM-PENDING'}
-              </Text>
-              <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#3b82f6' }]} onPress={() => teamAgeGroup === 'Adult' ? shareFanInvite(activePlayer?.name, activePlayer?.family_code) : shareCoParentInvite(activePlayer?.name, activePlayer?.family_code)}>
-                <Text style={styles.primaryAuthBtnText}>Share Code</Text>
-              </TouchableOpacity>
             </View>
+          ) : (
+            <ScrollView style={{ width: '100%' }} keyboardShouldPersistTaps="handled">
+              {/* Co-Parent / Guardian Code */}
+              <View style={[styles.card, { borderColor: '#3b82f6', marginBottom: 15 }]}>
+                <Text style={styles.cardTitle}>👨‍👩‍👦 Co-Parent / Guardian Code</Text>
+                <Text style={styles.bulletText}>
+                  Share this secure code with another guardian to give them parent access to {activePlayer?.name || 'your child'}'s profile:
+                </Text>
+                <Text style={{ color: '#ffffff', fontSize: 22, fontWeight: 'bold', marginVertical: 12, textAlign: 'center', letterSpacing: 3 }}>
+                  {activePlayer?.family_code || 'FAM-PENDING'}
+                </Text>
+                <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#3b82f6' }]} onPress={() => shareCoParentInvite(activePlayer?.name, activePlayer?.family_code)}>
+                  <Text style={styles.primaryAuthBtnText}>Share Co-Parent Code</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Extended Family & Fan Code */}
+              <View style={[styles.card, { borderColor: '#eab308' }]}>
+                <Text style={[styles.cardTitle, { color: '#eab308' }]}>📣 Extended Family & Fan Code</Text>
+                <Text style={styles.bulletText}>
+                  Share this code with grandparents, relatives, and supporters to let them follow live match scores and vote for POTM:
+                </Text>
+                <Text style={{ color: '#ffffff', fontSize: 22, fontWeight: 'bold', marginVertical: 12, textAlign: 'center', letterSpacing: 3 }}>
+                  {activeTeamObj?.fan_code || 'FAN-PENDING'}
+                </Text>
+                <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#eab308' }]} onPress={() => shareFanInvite(activeTeamObj?.name, activeTeamObj?.fan_code)}>
+                  <Text style={styles.primaryAuthBtnText}>Share Fan Code</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           )}
 
           <TouchableOpacity style={[styles.cancelBtn, { marginTop: 15 }]} onPress={onClose}>
