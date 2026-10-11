@@ -47,15 +47,31 @@ export default function CoachHubScreen({
       .map(player => {
         const votes = voteCounts[player.id] || 0;
         const share = totalSeasonVotes > 0 ? ((votes / totalSeasonVotes) * 100).toFixed(1) : '0.0';
+        const officialPotm = player.parent_motm || potmAwards[player.id] || 0;
         return {
           ...player,
           rawVotes: votes,
-          potmAwards: potmAwards[player.id] || 0,
+          potmAwards: officialPotm,
           voteShare: share
         };
       })
-      .sort((a, b) => b.rawVotes - a.rawVotes || b.potmAwards - a.potmAwards);
+      .sort((a, b) => b.potmAwards - a.potmAwards || b.rawVotes - a.rawVotes);
   }, [matchHistory, teamSheet]);
+
+  // Dynamic Game-State Tactics Resolution
+  const activeStateData = gameStateTactics[selectedGameState] || {
+    title: selectedGameState === 'leading' ? 'PROTECT & PUNISH (Leading)' : selectedGameState === 'losing' ? 'HIGH PRESS CHASE (Losing)' : 'BALANCED PATIENCE (Level)',
+    bullets: selectedGameState === 'leading' 
+      ? ['Control match tempo with secure possession in Midfield 3rd.', 'Exploit space behind opposition high line on transition.']
+      : selectedGameState === 'losing'
+      ? ['Trigger high press immediately upon losing possession.', 'Commit full-backs into advanced half-spaces.']
+      : ['Maintain structural balance between lines.', 'Recognize when to accelerate attack vs reset play.'],
+    shout: selectedGameState === 'leading'
+      ? '📢 Touchline Shout: "Stay composed! Make the ball do the work!"'
+      : selectedGameState === 'losing'
+      ? '📢 Touchline Shout: "Squeeze the pitch! Win it back high!"'
+      : '📢 Touchline Shout: "See early, decide early! Keep trusting the connections!"'
+  };
 
   return (
     <View style={styles.container}>
@@ -136,7 +152,7 @@ export default function CoachHubScreen({
                 <View style={{ flex: 1, marginLeft: 10 }}>
                   <Text style={styles.playerName}>#{player.squad_number || 0} {player.name}</Text>
                   <Text style={styles.playerSubtext}>
-                    {player.potmAwards}x Parent POTM • {player.voteShare}% of total votes
+                    {player.potmAwards}x Fan POTM • {player.voteShare}% vote share
                   </Text>
                 </View>
 
@@ -168,15 +184,16 @@ export default function CoachHubScreen({
           </View>
 
           <Text style={styles.gameStateHeading}>
-            {selectedGameState === 'leading' ? 'PROTECT & PUNISH (Leading)' : selectedGameState === 'losing' ? 'HIGH PRESS CHASE (Losing)' : 'BALANCED PATIENCE (Level)'}
+            {activeStateData.title || (selectedGameState === 'leading' ? 'PROTECT & PUNISH (Leading)' : selectedGameState === 'losing' ? 'HIGH PRESS CHASE (Losing)' : 'BALANCED PATIENCE (Level)')}
           </Text>
 
-          <Text style={styles.bulletText}>Maintain structural balance between lines.</Text>
-          <Text style={styles.bulletText}>Recognize when to accelerate attack vs reset play.</Text>
+          {(activeStateData.bullets || []).map((bullet, idx) => (
+            <Text key={idx} style={styles.bulletText}>• {bullet}</Text>
+          ))}
 
-          <Text style={styles.shoutText}>
-            📢 Touchline Shout: "See early, decide early! Keep trusting the connections!"
-          </Text>
+          {activeStateData.shout ? (
+            <Text style={styles.shoutText}>{activeStateData.shout}</Text>
+          ) : null}
         </View>
 
         {/* MY LINKED FAMILY PLAYER */}

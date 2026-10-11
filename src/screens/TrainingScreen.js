@@ -29,7 +29,6 @@ export default function TrainingScreen({
   const [selectedBlockId, setSelectedBlockId] = useState(1);
   const [selectedWeek, setSelectedWeek] = useState(1);
   
-  // Custom video overrides fetched from Supabase
   const [customBlockVideos, setCustomBlockVideos] = useState({});
   const [editingBlockVideo, setEditingBlockVideo] = useState(null);
   const [newVideoUrlInput, setNewVideoUrlInput] = useState('');
@@ -122,13 +121,11 @@ export default function TrainingScreen({
 
   return (
     <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
-      {/* HEADER */}
       <View style={styles.header}>
         <Text style={styles.headerSub}>52-WEEK ACADEMY PLAN</Text>
         <Text style={styles.headerTitle}>Training Center</Text>
       </View>
 
-      {/* 1. TRAINING ATTENDANCE REGISTER */}
       <View style={[styles.card, { borderColor: '#39FF14', marginBottom: 15 }]}>
         <TouchableOpacity
           style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
@@ -164,7 +161,6 @@ export default function TrainingScreen({
         )}
       </View>
 
-      {/* RPE LEGEND BANNER */}
       <View style={styles.rpeBanner}>
         <Text style={styles.rpeTitle}>🔥 RPE System (Rate of Perceived Exertion)</Text>
         <View style={styles.rpeLegendRow}>
@@ -175,7 +171,6 @@ export default function TrainingScreen({
         </View>
       </View>
 
-      {/* BEFORE EVERY SESSION */}
       <View style={styles.card}>
         <Text style={{ color: '#39FF14', fontSize: 16, fontWeight: 'bold', marginBottom: 6 }}>
           BEFORE EVERY SESSION
@@ -184,54 +179,35 @@ export default function TrainingScreen({
           A repeatable 10-minute warm-up to prepare your joints, movement and ball contact.
         </Text>
 
-        {/* Dynamic Warm-Up Minute Timeline Rows */}
         <View style={{ gap: 10, marginBottom: 15 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View style={styles.minPill}>
-              <Text style={styles.minPillText}>MIN 1-2</Text>
-            </View>
-            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>
-              Jog, skip, shuffle and move backward.
-            </Text>
+            <View style={styles.minPill}><Text style={styles.minPillText}>MIN 1-2</Text></View>
+            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>Jog, skip, shuffle and move backward.</Text>
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View style={styles.minPill}>
-              <Text style={styles.minPillText}>MIN 3-4</Text>
-            </View>
-            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>
-              Complete ankle rocks, hip openings and controlled leg swings.
-            </Text>
+            <View style={styles.minPill}><Text style={styles.minPillText}>MIN 3-4</Text></View>
+            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>Complete ankle rocks, hip openings and controlled leg swings.</Text>
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View style={styles.minPill}>
-              <Text style={styles.minPillText}>MIN 5-7</Text>
-            </View>
-            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>
-              Complete calf raises, split squats and glute bridges.
-            </Text>
+            <View style={styles.minPill}><Text style={styles.minPillText}>MIN 5-7</Text></View>
+            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>Complete calf raises, split squats and glute bridges.</Text>
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View style={styles.minPill}>
-              <Text style={styles.minPillText}>MIN 8-10</Text>
-            </View>
-            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>
-              Add close ball touches and three progressive runs.
-            </Text>
+            <View style={styles.minPill}><Text style={styles.minPillText}>MIN 8-10</Text></View>
+            <Text style={{ color: '#ffffff', fontSize: 13, flex: 1 }}>Add close ball touches and three progressive runs.</Text>
           </View>
         </View>
 
-        {/* ONE STRENGTH ROUND (WITH POSTURE TUTORIAL LINKS) */}
         <View style={{ backgroundColor: '#ffffff', padding: 15, borderRadius: 10 }}>
           <Text style={{ color: '#0B0E14', fontSize: 15, fontWeight: 'bold', marginBottom: 10 }}>
             ONE STRENGTH ROUND
           </Text>
 
-          {/* 1. Split Squats */}
           <View style={styles.exerciseRow}>
-            <Text style={styles.exerciseText}>• 8 split squats per side</Text>
+            <Text style={styles.exerciseText}>8 split squats per side</Text>
             <TouchableOpacity
               style={styles.formBtnPill}
               onPress={() => openDrillVideo && openDrillVideo('https://youtu.be/hXpGSa5HYqY?si=lMHSiLsWsQtrAZgu')}
@@ -240,9 +216,8 @@ export default function TrainingScreen({
             </TouchableOpacity>
           </View>
 
-          {/* 2. Glute Bridges or Hip Hinges */}
           <View style={styles.exerciseRowMulti}>
-            <Text style={styles.exerciseText}>• 10 glute bridges or hip hinges</Text>
+            <Text style={styles.exerciseText}>10 glute bridges or hip hinges</Text>
             <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
               <TouchableOpacity
                 style={styles.formBtnPill}
@@ -259,9 +234,8 @@ export default function TrainingScreen({
             </View>
           </View>
 
-          {/* 3. Calf Raises */}
           <View style={styles.exerciseRow}>
-            <Text style={styles.exerciseText}>• 12 calf raises</Text>
+            <Text style={styles.exerciseText}>12 calf raises</Text>
             <TouchableOpacity
               style={styles.formBtnPill}
               onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/haHcBAd637E?si=lOR9t3siYwTkRI_g')}
@@ -270,9 +244,8 @@ export default function TrainingScreen({
             </TouchableOpacity>
           </View>
 
-          {/* 4. Side Plank */}
           <View style={styles.exerciseRow}>
-            <Text style={styles.exerciseText}>• 20-second side plank per side</Text>
+            <Text style={styles.exerciseText}>20-second side plank per side</Text>
             <TouchableOpacity
               style={styles.formBtnPill}
               onPress={() => openDrillVideo && openDrillVideo('https://youtube.com/shorts/BtM0a9x1F5o?si=6y0esyL3X2htSplP')}
@@ -287,7 +260,6 @@ export default function TrainingScreen({
         </View>
       </View>
 
-      {/* 2. RECORD THESE TESTS */}
       <View style={styles.testsCard}>
         <Text style={styles.testsTitle}>RECORD THESE TESTS</Text>
         <View style={styles.testGrid}>
@@ -322,7 +294,6 @@ export default function TrainingScreen({
         </View>
       </View>
 
-      {/* BLOCK SELECTOR (BLOCKS 1 - 13) */}
       <Text style={styles.sectionTitle}>Select Block (1-13):</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
         {curriculum52Blocks.map(b => (
@@ -341,7 +312,6 @@ export default function TrainingScreen({
         ))}
       </ScrollView>
 
-      {/* WEEKS IN CURRENT BLOCK */}
       <View style={styles.weekTabRow}>
         {activeBlock.weeks.map(w => (
           <TouchableOpacity
@@ -356,7 +326,6 @@ export default function TrainingScreen({
         ))}
       </View>
 
-      {/* WEEK FOCUS CARD */}
       <View style={[styles.card, { marginBottom: 30 }]}>
         <View style={styles.cardHeaderRow}>
           <Text style={styles.cardBlockLabel}>BLOCK {activeBlock.block} • WEEK {selectedWeek}</Text>
@@ -387,7 +356,6 @@ export default function TrainingScreen({
 
         <View style={styles.divider} />
 
-        {/* SESSION 1 */}
         <View style={styles.sessionBox}>
           <View style={styles.sessionHeaderRow}>
             <Text style={styles.sessionName}>SESSION 1 (S1)</Text>
@@ -400,7 +368,6 @@ export default function TrainingScreen({
           <Text style={styles.sessionDesc}>{activeWeekData.s1?.text}</Text>
         </View>
 
-        {/* SESSION 2 */}
         <View style={styles.sessionBox}>
           <View style={styles.sessionHeaderRow}>
             <Text style={styles.sessionName}>SESSION 2 (S2)</Text>
@@ -413,7 +380,6 @@ export default function TrainingScreen({
           <Text style={styles.sessionDesc}>{activeWeekData.s2?.text}</Text>
         </View>
 
-        {/* SESSION 3 */}
         <View style={styles.sessionBox}>
           <View style={styles.sessionHeaderRow}>
             <Text style={styles.sessionName}>SESSION 3 (S3)</Text>
@@ -427,7 +393,6 @@ export default function TrainingScreen({
         </View>
       </View>
 
-      {/* EDIT BLOCK VIDEO MODAL */}
       <Modal visible={!!editingBlockVideo} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
@@ -492,7 +457,7 @@ const styles = StyleSheet.create({
 
   exerciseRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justify: 'space-between',
     alignItems: 'center',
     paddingVertical: 6,
     borderBottomWidth: 1,

@@ -17,10 +17,9 @@ export default function MatchArchiveModal({
   setEditingArchiveEventIdx
 }) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [resultFilter, setResultFilter] = useState('ALL'); // 'ALL' | 'W' | 'D' | 'L'
-  const [typeFilter, setTypeFilter] = useState('ALL');   // 'ALL' | 'LEAGUE' | 'CUP' | 'FRIENDLY'
+  const [resultFilter, setResultFilter] = useState('ALL');
+  const [typeFilter, setTypeFilter] = useState('ALL');
 
-  // Dynamic Multi-Criterion Filter
   const filteredHistory = (matchHistory || []).filter(m => {
     const oppName = (m.opponent_name || '').toLowerCase();
     const matchesSearch = oppName.includes(searchQuery.toLowerCase().trim());
@@ -34,7 +33,6 @@ export default function MatchArchiveModal({
   return (
     <Modal visible={visible} animationType="slide">
       <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0E14' }}>
-        {/* HEADER BAR */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: '#1A1F26', borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
           <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>📜 Past Match Reports</Text>
           <TouchableOpacity onPress={onClose} style={{ backgroundColor: '#0B0E14', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44' }}>
@@ -42,9 +40,7 @@ export default function MatchArchiveModal({
           </TouchableOpacity>
         </View>
 
-        {/* SEARCH & FILTER CONTROLLER BAR */}
         <View style={styles.filterContainer}>
-          {/* SEARCH INPUT */}
           <TextInput
             style={styles.searchInput}
             placeholder="🔍 Search opponent name..."
@@ -54,7 +50,6 @@ export default function MatchArchiveModal({
             autoCapitalize="none"
           />
 
-          {/* RESULT FILTER CHIPS */}
           <View style={styles.chipRow}>
             <Text style={styles.filterLabel}>Result:</Text>
             {['ALL', 'W', 'D', 'L'].map(res => (
@@ -76,7 +71,6 @@ export default function MatchArchiveModal({
             ))}
           </View>
 
-          {/* TYPE FILTER CHIPS */}
           <View style={styles.chipRow}>
             <Text style={styles.filterLabel}>Type:</Text>
             {['ALL', 'LEAGUE', 'CUP', 'FRIENDLY'].map(type => (
@@ -93,7 +87,6 @@ export default function MatchArchiveModal({
           </View>
         </View>
 
-        {/* ARCHIVED MATCHES LIST */}
         <ScrollView style={{ padding: 15 }}>
           {filteredHistory.length === 0 ? (
             <Text style={styles.emptyText}>No match reports found matching your criteria.</Text>
@@ -141,7 +134,6 @@ export default function MatchArchiveModal({
           )}
         </ScrollView>
 
-        {/* INLINE GOAL & ASSIST EDIT OVERLAY */}
         {archiveEditStep !== 'none' && (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
             <View style={[styles.modalBox, { width: '100%', maxHeight: '80%' }]}>

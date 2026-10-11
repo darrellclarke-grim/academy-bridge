@@ -3,6 +3,8 @@ import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 export default function PdfExportModal({
   visible,
   onClose,
+  isPdfExportModalOpen,
+  setIsPdfExportModalOpen,
   pdfExportStep,
   setPdfExportStep,
   exportMatchdaySummary,
@@ -12,10 +14,26 @@ export default function PdfExportModal({
   activeTeamObj,
   effectiveAgeGroup,
   teamLogoUrl,
-  generatePlayerReportCard,
+  generatePlayerReportCard
 }) {
+  // Defensive fallbacks for prop names
+  const isVisible = visible !== undefined ? Boolean(visible) : Boolean(isPdfExportModalOpen);
+
+  const handleClose = () => {
+    if (typeof onClose === 'function') {
+      onClose();
+    } else if (typeof setIsPdfExportModalOpen === 'function') {
+      setIsPdfExportModalOpen(false);
+    }
+  };
+
   return (
-    <Modal visible={visible} transparent={true} animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={isVisible}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={handleClose}
+    >
       <View style={styles.modalOverlay}>
         <View style={styles.modalBox}>
           {pdfExportStep === 'type' ? (
@@ -28,8 +46,8 @@ export default function PdfExportModal({
               <TouchableOpacity
                 style={styles.inviteRow}
                 onPress={() => {
-                  onClose();
-                  exportMatchdaySummary();
+                  handleClose();
+                  if (typeof exportMatchdaySummary === 'function') exportMatchdaySummary();
                 }}
               >
                 <View>
@@ -40,7 +58,10 @@ export default function PdfExportModal({
                 </View>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.inviteRow} onPress={() => setPdfExportStep('player_select')}>
+              <TouchableOpacity
+                style={styles.inviteRow}
+                onPress={() => setPdfExportStep && setPdfExportStep('player_select')}
+              >
                 <View>
                   <Text style={styles.inviteName}>👤 Individual Player Report</Text>
                   <Text style={[styles.inviteCodeText, { color: '#64748B', marginTop: 2, fontWeight: 'normal' }]}>
@@ -49,7 +70,10 @@ export default function PdfExportModal({
                 </View>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.cancelBtn, { marginTop: 10 }]} onPress={onClose}>
+              <TouchableOpacity
+                style={[styles.cancelBtn, { marginTop: 10 }]}
+                onPress={handleClose}
+              >
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
             </>
@@ -57,7 +81,7 @@ export default function PdfExportModal({
             <>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <Text style={styles.modalTitle}>Select Player</Text>
-                <TouchableOpacity onPress={() => setPdfExportStep('type')}>
+                <TouchableOpacity onPress={() => setPdfExportStep && setPdfExportStep('type')}>
                   <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 12 }}>⬅ Back</Text>
                 </TouchableOpacity>
               </View>
@@ -68,14 +92,16 @@ export default function PdfExportModal({
                     key={p.id}
                     style={styles.inviteRow}
                     onPress={async () => {
-                      onClose();
-                      const currentTeam = myTeams.find((t) => t.id === activeTeamId);
-                      await generatePlayerReportCard({
-                        player: p,
-                        teamName: currentTeam?.name || activeTeamObj?.name || 'Tactical Engine Squad',
-                        ageGroup: currentTeam?.age_group || effectiveAgeGroup || 'Youth',
-                        clubLogoUrl: currentTeam?.logo_url || teamLogoUrl || null,
-                      });
+                      handleClose();
+                      const currentTeam = (myTeams || []).find((t) => t.id === activeTeamId);
+                      if (typeof generatePlayerReportCard === 'function') {
+                        await generatePlayerReportCard({
+                          player: p,
+                          teamName: currentTeam?.name || activeTeamObj?.name || 'Tactical Engine Squad',
+                          ageGroup: currentTeam?.age_group || effectiveAgeGroup || 'Youth',
+                          clubLogoUrl: currentTeam?.logo_url || teamLogoUrl || null
+                        });
+                      }
                     }}
                   >
                     <Text style={styles.inviteName}>#{p.squad_number || 0} {p.name}</Text>
@@ -84,7 +110,10 @@ export default function PdfExportModal({
                 ))}
               </ScrollView>
 
-              <TouchableOpacity style={[styles.cancelBtn, { marginTop: 10 }]} onPress={onClose}>
+              <TouchableOpacity
+                style={[styles.cancelBtn, { marginTop: 10 }]}
+                onPress={handleClose}
+              >
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
             </>
