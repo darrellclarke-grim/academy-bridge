@@ -38,7 +38,6 @@ export const generateSeasonPdfReport = async ({
     const DEFAULT_HEADER_LOGO_URL = 'https://jnogngcywfgitzryooig.supabase.co/storage/v1/object/public/app-assets/Tactical%20Engine%20Logo.png';
     const FOOTER_CREDIT_LOGO_URL = 'https://jnogngcywfgitzryooig.supabase.co/storage/v1/object/public/app-assets/In%20app%20Footer%20credit%20Logo.png';
 
-    // Light-theme offline vector fallbacks
     const fallbackHeaderSvg = `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60" width="120" height="36">
         <rect width="200" height="60" rx="8" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1"/>
@@ -76,7 +75,7 @@ export const generateSeasonPdfReport = async ({
       ? `<img src="${footerLogoBase64}" class="footer-logo" alt="Powered by Tactical Engine" />`
       : fallbackFooterSvg;
 
-    // Calculate Team Record Analytics
+    // Team Record Analytics
     const totalMatches = matchHistory.length;
     const wins = matchHistory.filter(m => m.result === 'W').length;
     const draws = matchHistory.filter(m => m.result === 'D').length;
@@ -86,12 +85,11 @@ export const generateSeasonPdfReport = async ({
     const goalDiff = goalsFor - goalsAgainst;
     const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
 
-    // Determine Role/Age Terminology
     const isAdult = String(ageGroup || '').toLowerCase().includes('adult');
     const coachAwardTitle = "CPOTS";
     const parentAwardTitle = isAdult ? "FPOTS" : "PPOTS";
 
-    // Calculate Individual Season Honours
+    // Leaderboards
     const sortedByGoals = [...teamSheet].sort((a, b) => (b.goals || 0) - (a.goals || 0));
     const sortedByAssists = [...teamSheet].sort((a, b) => (b.assists || 0) - (a.assists || 0));
     const sortedByCoachPotm = [...teamSheet].sort((a, b) => (b.motm || 0) - (a.motm || 0));
@@ -113,7 +111,6 @@ export const generateSeasonPdfReport = async ({
       ? `${sortedByParentPotm[0].name} (${sortedByParentPotm[0].parent_motm} Awards)`
       : 'N/A';
 
-    // Render squad rows with master stats
     const playerRowsHtml = (teamSheet || []).map((p, idx) => {
       const totalMins = p.total_minutes_played || 0;
       const avgMins = p.apps > 0 ? Math.round(totalMins / p.apps) : 0;
@@ -133,7 +130,6 @@ export const generateSeasonPdfReport = async ({
       `;
     }).join('');
 
-    // Render match history rows
     const matchRowsHtml = (matchHistory || []).map((m, idx) => `
       <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
         <td class="text-sub" style="padding: 7px 8px;">${m.created_at ? new Date(m.created_at).toLocaleDateString() : 'Season Match'}</td>
@@ -178,7 +174,6 @@ export const generateSeasonPdfReport = async ({
           </style>
         </head>
         <body>
-          <!-- HEADER -->
           <table class="header-table">
             <tr>
               <td style="vertical-align: middle;">
@@ -189,7 +184,6 @@ export const generateSeasonPdfReport = async ({
             </tr>
           </table>
 
-          <!-- TEAM RECORD SUMMARY -->
           <div class="card">
             <div class="card-title">📊 TEAM RECORD & PERFORMANCE SUMMARY</div>
             <div class="honours-grid">
@@ -208,7 +202,6 @@ export const generateSeasonPdfReport = async ({
             </div>
           </div>
 
-          <!-- INDIVIDUAL HONOURS -->
           <div class="card">
             <div class="card-title">⭐ INDIVIDUAL SEASON HONOURS</div>
             <div class="honours-grid">
@@ -238,7 +231,6 @@ export const generateSeasonPdfReport = async ({
             </div>
           ` : ''}
 
-          <!-- SQUAD MASTER ANALYTICS -->
           <div class="card">
             <div class="card-title">👥 SQUAD MASTER STATS BREAKDOWN</div>
             <table>
@@ -260,7 +252,6 @@ export const generateSeasonPdfReport = async ({
             </table>
           </div>
 
-          <!-- PAGE 2: MATCH ARCHIVE & FOOTER -->
           <div class="card page-break">
             <div class="card-title">SEASON MATCH ARCHIVE</div>
             <table>
@@ -351,17 +342,74 @@ export const generatePlayerReportCard = async ({
       ? `<img src="${footerLogoBase64}" class="footer-logo" alt="Powered by Tactical Engine" />`
       : fallbackFooterSvg;
 
-    // Attributes & Overall Score
-    const tech = player.attributes?.technical || 70;
-    const tact = player.attributes?.tactical || 70;
-    const phys = player.attributes?.physical || 70;
-    const ment = player.attributes?.mental || 70;
+    // ⚡ DYNAMIC STAT CALCULATIONS FROM REAL SUPABASE 1-10 FIELDS (Scaled to 0-100%)
+    const calcAvgScaled = (arr) => {
+      const valid = arr.filter(v => typeof v === 'number' && !isNaN(v));
+      if (valid.length === 0) return 50;
+      const sum = valid.reduce((a, b) => a + b, 0);
+      return Math.round((sum / valid.length) * 10);
+    };
+
+    const isGk = String(player.position || '').toUpperCase().includes('GK');
+
+    const phys = calcAvgScaled([
+      player.phys_sprint,
+      player.phys_accel,
+      player.phys_stamina,
+      player.phys_strength,
+      player.phys_agility,
+    ]);
+
+    const tech = isGk
+      ? calcAvgScaled([
+          player.gk_shot_stopping,
+          player.gk_handling,
+          player.gk_1v1,
+          player.gk_aerial,
+          player.gk_sweeping,
+          player.gk_distribution,
+        ])
+      : calcAvgScaled([
+          player.tech_first_touch,
+          player.tech_short_pass,
+          player.tech_dribbling,
+          player.tech_shooting_acc,
+          player.tech_shooting_pow,
+          player.tech_crossing,
+          player.tech_tackling,
+          player.tech_intercept,
+          player.tech_aerial,
+          player.tech_positioning,
+        ]);
+
+    const tact = calcAvgScaled([
+      player.tact_awareness,
+      player.tact_pressing,
+      player.tact_instructions,
+      player.tact_decision,
+    ]);
+
+    const ment = calcAvgScaled([
+      player.psych_confidence,
+      player.psych_aggression,
+      player.psych_leadership,
+      player.psych_workrate,
+      player.psych_composure,
+    ]);
+
     const overall = Math.round((tech + tact + phys + ment) / 4);
 
-    // Match Performance Metrics
+    // Performance Metrics
     const totalMins = player.total_minutes_played || 0;
     const apps = player.apps || 0;
     const totalPotm = (player.motm || 0) + (player.parent_motm || 0);
+
+    // Dynamic Notes
+    const hasWeaknessNotes = Boolean(player.notes_weaknesses);
+    const hasCommNotes = Boolean(player.notes_communication);
+    const hasGeneralNotes = Boolean(player.coach_development_notes || player.notes_notes || player.notes);
+
+    const hasAnyNotes = hasWeaknessNotes || hasCommNotes || hasGeneralNotes;
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -394,7 +442,8 @@ export const generatePlayerReportCard = async ({
             .stat-val { font-size: 16px; font-weight: bold; color: #15803D; margin-top: 4px; }
             .bar-bg { background-color: #E2E8F0; height: 6px; border-radius: 3px; margin-top: 8px; overflow: hidden; }
             .bar-fill { background-color: #15803D; height: 100%; }
-            .notes-text { font-size: 12px; color: #334155; line-height: 1.5; margin: 0; }
+            .note-header { font-size: 10px; color: #15803D; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }
+            .notes-text { font-size: 11px; color: #334155; line-height: 1.5; margin: 0 0 10px 0; }
             .footer { margin-top: 30px; border-top: 1px solid #E2E8F0; padding-top: 15px; text-align: center; }
             .footer-logo { max-width: 220px; max-height: 38px; width: auto; height: auto; object-fit: contain; }
           </style>
@@ -472,9 +521,15 @@ export const generatePlayerReportCard = async ({
 
           <div class="card">
             <div class="card-title">📝 HEAD COACH DEVELOPMENT NOTES</div>
-            <p class="notes-text">
-              ${player.notes || player.coach_notes || 'Player exhibits strong technical consistency and positive engagement during matchday and training sessions.'}
-            </p>
+            ${
+              hasAnyNotes
+                ? `
+                  ${hasWeaknessNotes ? `<div class="note-header">🎯 Areas for Improvement</div><p class="notes-text">${player.notes_weaknesses}</p>` : ''}
+                  ${hasCommNotes ? `<div class="note-header">🗣️ Communication & Leadership</div><p class="notes-text">${player.notes_communication}</p>` : ''}
+                  ${hasGeneralNotes ? `<div class="note-header">📝 General Observations</div><p class="notes-text">${player.coach_development_notes || player.notes_notes || player.notes}</p>` : ''}
+                `
+                : `<p class="notes-text" style="color: #64748B; font-style: italic;">No notes recorded.</p>`
+            }
           </div>
 
           <div class="footer">${footerLogoHtml}</div>

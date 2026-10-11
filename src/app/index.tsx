@@ -39,6 +39,7 @@ import {
 } from '../utils/positionHelpers';
 
 // Modals
+import CoachNotesStagingModal from '../modals/CoachNotesStagingModal';
 import CreateTeamModal from '../modals/CreateTeamModal';
 import FormationModal from '../modals/FormationModal';
 import InviteModal from '../modals/InviteModal';
@@ -120,6 +121,9 @@ export default function App() {
   const [isPdfExportModalOpen, setIsPdfExportModalOpen] = useState(false);
   const [pdfExportStep, setPdfExportStep] = useState('type'); 
   
+  // Notes Staging State
+  const [isNotesStagingModalOpen, setIsNotesStagingModalOpen] = useState(false);
+
   // Formation & Lineup State
   const [activeFormation, setActiveFormation] = useState('4-2-3-1');
   const [isFormationModalOpen, setIsFormationModalOpen] = useState(false);
@@ -475,7 +479,6 @@ export default function App() {
       console.error("Critical Error fetching cloud data:", err);
     }
   };
-
   async function broadcastEvent(icon, text, explicitMinute = null) {
     if (!activeTeamId) return;
     const min = explicitMinute || `${Math.floor(displaySeconds / 60)}'`;
@@ -650,6 +653,7 @@ export default function App() {
       setLoading(false);
     }
   }
+
   useEffect(() => {
     let initialMount = true;
     fetchCloudData();
@@ -776,7 +780,6 @@ export default function App() {
     setAppMode(mode);
     setCurrentTab(mode === 'coach' ? 'coachHub' : 'player');
   };
-
   const handlePhaseChange = () => {
     if (!activeTeamId) return;
 
@@ -1084,7 +1087,7 @@ export default function App() {
       Alert.alert("Reset Error", err.message);
     }
   };
-  
+
   const startArchiveGoalEdit = (matchRecord, eventIdx) => {
     setEditingArchiveMatch(matchRecord);
     setEditingArchiveEventIdx(eventIdx);
@@ -1279,15 +1282,15 @@ export default function App() {
     setIsTafeModalOpen(true);
   };
 
-  // ⚡ TAFE ALGORITHM (FULL 27-FORMATION 9v9 & 11v11 SUPPORT)
+  // ⚡ TAFE ALGORITHM (FULL 29-FORMATION 9v9 & 11v11 SUPPORT)
   const runTafeAlgorithm = (backlineCode) => {
     setTafeBackline(backlineCode);
     
     let category;
     if (is9v9Team) {
-      category = formationCategories9v9.find(c => c.title.startsWith(`${backlineCode}-`));
+      category = formationCategories9v9.find(c => c.title.startsWith(backlineCode));
     } else {
-      category = formationCategories.find(c => c.title.startsWith(`${backlineCode}-`));
+      category = formationCategories.find(c => c.title.startsWith(backlineCode));
     }
 
     if (!category) {
@@ -2047,7 +2050,6 @@ export default function App() {
       </SafeAreaView>
     );
   }
-
   // 🔒 LOGIN / SIGN-UP SCREEN
   if (!session) {
     return (
@@ -2678,6 +2680,15 @@ export default function App() {
         shareStaffInvite={shareStaffInvite}
         shareFanInvite={shareFanInvite}
         shareCoParentInvite={shareCoParentInvite}
+      />
+
+      {/* COACH NOTES STAGING MODAL */}
+      <CoachNotesStagingModal
+        visible={isNotesStagingModalOpen}
+        onClose={() => setIsNotesStagingModalOpen(false)}
+        teamSheet={teamSheet}
+        activeTeamId={activeTeamId}
+        onNotesPushed={() => fetchTeamData(session?.user?.id, activeTeamId)}
       />
 
       {/* FA LEAGUE TABLE WEBVIEW MODAL */}
@@ -3325,6 +3336,14 @@ export default function App() {
                       <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>👥 Manage Team Staff</Text>
                     </TouchableOpacity>
                   )}
+
+                  {/* STAGED PLAYER NOTES CENTER BUTTON */}
+                  <TouchableOpacity 
+                    style={[styles.sidebarItem, { borderColor: '#39FF14' }]} 
+                    onPress={() => { setIsSidebarOpen(false); setIsNotesStagingModalOpen(true); }}
+                  >
+                    <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>📝 Staged Player Notes Center</Text>
+                  </TouchableOpacity>
 
                   <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setPdfExportStep('type'); setIsPdfExportModalOpen(true); }}>
                     <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>📄 Export Branded PDF Report</Text>
