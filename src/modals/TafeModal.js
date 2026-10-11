@@ -8,7 +8,8 @@ export default function TafeModal({
   tafeSuggestions,
   tafeOther,
   runTafeAlgorithm,
-  applyTafeFormation
+  applyTafeFormation,
+  is9v9Team
 }) {
   return (
     <Modal visible={visible} transparent={true} animationType="fade">
@@ -21,17 +22,35 @@ export default function TafeModal({
             <View>
               <Text style={styles.bulletText}>Select your preferred backline. TAFE will analyze available players' impact (G/A) and average minutes to suggest optimal lineups.</Text>
               
-              <TouchableOpacity style={[styles.primaryAuthBtn, { marginTop: 20, backgroundColor: '#3B82F6' }]} onPress={() => runTafeAlgorithm('4')}>
-                <Text style={styles.primaryAuthBtnText}>4-at-the-Back (Standard)</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={[styles.primaryAuthBtn, { marginTop: 15, backgroundColor: '#39FF14' }]} onPress={() => runTafeAlgorithm('3')}>
-                <Text style={[styles.primaryAuthBtnText, { color: '#0B0E14' }]}>3-at-the-Back (Aggressive)</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={[styles.primaryAuthBtn, { marginTop: 15, backgroundColor: '#0B0E14', borderWidth: 1, borderColor: '#2E3A44' }]} onPress={() => runTafeAlgorithm('5')}>
-                <Text style={[styles.primaryAuthBtnText, { color: '#CBD5E1' }]}>5-at-the-Back (Defensive)</Text>
-              </TouchableOpacity>
+              {is9v9Team ? (
+                <>
+                  <TouchableOpacity style={[styles.primaryAuthBtn, { marginTop: 20, backgroundColor: '#3B82F6' }]} onPress={() => runTafeAlgorithm('3')}>
+                    <Text style={styles.primaryAuthBtnText}>3-Back (9v9 Standard)</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={[styles.primaryAuthBtn, { marginTop: 15, backgroundColor: '#39FF14' }]} onPress={() => runTafeAlgorithm('2')}>
+                    <Text style={[styles.primaryAuthBtnText, { color: '#0B0E14' }]}>2-Back (9v9 Aggressive)</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={[styles.primaryAuthBtn, { marginTop: 15, backgroundColor: '#0B0E14', borderWidth: 1, borderColor: '#2E3A44' }]} onPress={() => runTafeAlgorithm('4')}>
+                    <Text style={[styles.primaryAuthBtnText, { color: '#CBD5E1' }]}>4-Back (9v9 Defensive)</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <TouchableOpacity style={[styles.primaryAuthBtn, { marginTop: 20, backgroundColor: '#3B82F6' }]} onPress={() => runTafeAlgorithm('4')}>
+                    <Text style={styles.primaryAuthBtnText}>4-at-the-Back (Standard)</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={[styles.primaryAuthBtn, { marginTop: 15, backgroundColor: '#39FF14' }]} onPress={() => runTafeAlgorithm('3')}>
+                    <Text style={[styles.primaryAuthBtnText, { color: '#0B0E14' }]}>3-at-the-Back (Aggressive)</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={[styles.primaryAuthBtn, { marginTop: 15, backgroundColor: '#0B0E14', borderWidth: 1, borderColor: '#2E3A44' }]} onPress={() => runTafeAlgorithm('5')}>
+                    <Text style={[styles.primaryAuthBtnText, { color: '#CBD5E1' }]}>5-at-the-Back (Defensive)</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           )}
 
@@ -45,14 +64,18 @@ export default function TafeModal({
                 </TouchableOpacity>
               ))}
 
-              <Text style={[styles.sectionHeaderModal, { marginTop: 20 }]}>Other {tafeBackline}-Back Options</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                {tafeOther.map(fmt => (
-                  <TouchableOpacity key={fmt} style={[styles.gridBtn, { minWidth: '45%' }]} onPress={() => applyTafeFormation(fmt, 'balanced')}>
-                    <Text style={styles.gridBtnText}>{fmt}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              {tafeOther && tafeOther.length > 0 && (
+                <>
+                  <Text style={[styles.sectionHeaderModal, { marginTop: 20 }]}>Other {tafeBackline}-Back Options</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {tafeOther.map(fmt => (
+                      <TouchableOpacity key={fmt} style={[styles.gridBtn, { minWidth: '45%' }]} onPress={() => applyTafeFormation(fmt, 'balanced')}>
+                        <Text style={styles.gridBtnText}>{fmt}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
             </ScrollView>
           )}
 
