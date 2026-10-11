@@ -41,9 +41,12 @@ import {
 // Modals
 import CoachNotesStagingModal from '../modals/CoachNotesStagingModal';
 import CreateTeamModal from '../modals/CreateTeamModal';
+import EditPlayerProfileModal from '../modals/EditPlayerProfileModal';
 import FormationModal from '../modals/FormationModal';
 import InviteModal from '../modals/InviteModal';
+import LiveEventModals from '../modals/LiveEventModals';
 import MatchArchiveModal from '../modals/MatchArchiveModal';
+import PdfExportModal from '../modals/PdfExportModal';
 import SeasonResetModal from '../modals/SeasonResetModal';
 import StaffManagementModal from '../modals/StaffManagementModal';
 import SubReasonModal from '../modals/SubReasonModal';
@@ -780,6 +783,7 @@ export default function App() {
     setAppMode(mode);
     setCurrentTab(mode === 'coach' ? 'coachHub' : 'player');
   };
+
   const handlePhaseChange = () => {
     if (!activeTeamId) return;
 
@@ -1856,15 +1860,6 @@ export default function App() {
     await supabase.from('players').update({ [statKey]: newVal }).eq('id', player.id);
   }
 
-  const adjustProfileStat = (statKey, delta) => {
-    setEditingPlayer(prev => {
-      if (!prev) return null;
-      const currentVal = prev[statKey] || 5;
-      const newVal = Math.max(1, Math.min(10, currentVal + delta)); 
-      return { ...prev, [statKey]: newVal };
-    });
-  };
-
   const submitTrainingSession = async () => {
     const updates = (teamSheet || []).map(p => {
       if (p && p.id && (trainingRegister || {})[p.id]) {
@@ -1933,20 +1928,6 @@ export default function App() {
   const handleRestartQuiz = () => {
     setQuizState(null);
     setCurrentQuizIdx(0);
-  };
-
-  const render1to10Row = (label, statKey) => {
-    const val = editingPlayer?.[statKey] ?? 5;
-    return (
-      <View style={styles.statCounterRow} key={statKey}>
-        <Text style={styles.statCounterLabel}>{label}:</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
-          <TouchableOpacity style={styles.counterBtn} onPress={() => adjustProfileStat(statKey, -1)}><Text style={styles.counterBtnText}>-</Text></TouchableOpacity>
-          <Text style={styles.statValueText}>{val}/10</Text>
-          <TouchableOpacity style={styles.counterBtn} onPress={() => adjustProfileStat(statKey, 1)}><Text style={styles.counterBtnText}>+</Text></TouchableOpacity>
-        </View>
-      </View>
-    );
   };
 
   const renderProfileStatBar = (label, value) => {
@@ -2032,7 +2013,6 @@ export default function App() {
       </View>
     );
   };
-
   const SUPABASE_LOGO_URL = 'https://jnogngcywfgitzryooig.supabase.co/storage/v1/object/public/app-assets/Tactical%20Engine%20Logo.png';
 
   if (loading) {
@@ -2050,6 +2030,7 @@ export default function App() {
       </SafeAreaView>
     );
   }
+
   // 🔒 LOGIN / SIGN-UP SCREEN
   if (!session) {
     return (
@@ -2691,6 +2672,51 @@ export default function App() {
         onNotesPushed={() => fetchTeamData(session?.user?.id, activeTeamId)}
       />
 
+      {/* EXTRACTED: EDIT PLAYER PROFILE MODAL */}
+      <EditPlayerProfileModal
+        editingPlayer={editingPlayer}
+        setEditingPlayer={setEditingPlayer}
+        updateFullPlayerProfile={updateFullPlayerProfile}
+        assignPlayerRole={assignPlayerRole}
+        initiateDeletePlayer={initiateDeletePlayer}
+        profile={profile}
+        appMode={appMode}
+      />
+
+      {/* EXTRACTED: LIVE MATCH EVENT MODALS */}
+      <LiveEventModals
+        liveEventMode={liveEventMode}
+        setLiveEventMode={setLiveEventMode}
+        pendingEvent={pendingEvent}
+        opponentName={opponentName}
+        onPitchPlayers={onPitchPlayers}
+        subs={subs}
+        teamSheet={teamSheet}
+        selectGoalScorer={selectGoalScorer}
+        selectGoalAssist={selectGoalAssist}
+        selectCardType={selectCardType}
+        finishCardFlow={finishCardFlow}
+        promptSubReason={promptSubReason}
+        selectCoachMotm={selectCoachMotm}
+        selectParentMotm={selectParentMotm}
+      />
+
+      {/* EXTRACTED: BRANDED PDF EXPORT MODAL */}
+      <PdfExportModal
+        isPdfExportModalOpen={isPdfExportModalOpen}
+        setIsPdfExportModalOpen={setIsPdfExportModalOpen}
+        pdfExportStep={pdfExportStep}
+        setPdfExportStep={setPdfExportStep}
+        exportMatchdaySummary={exportMatchdaySummary}
+        teamSheet={teamSheet}
+        myTeams={myTeams}
+        activeTeamId={activeTeamId}
+        activeTeamObj={activeTeamObj}
+        effectiveAgeGroup={effectiveAgeGroup}
+        teamLogoUrl={teamLogoUrl}
+        generatePlayerReportCard={generatePlayerReportCard}
+      />
+
       {/* FA LEAGUE TABLE WEBVIEW MODAL */}
       <Modal visible={isFaWebviewOpen} animationType="slide">
         <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0E14' }}>
@@ -2776,120 +2802,6 @@ export default function App() {
               ))}
             </ScrollView>
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setDrillSelectorMode(null)}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* EVENT LOGGING MODALS */}
-      <Modal visible={liveEventMode === 'goal_scorer'} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setLiveEventMode('none')} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Who Scored? ({pendingEvent?.minute})</Text>
-            <ScrollView style={{ maxHeight: 300 }}>
-              <TouchableOpacity style={[styles.benchBtn, { backgroundColor: '#7f1d1d' }]} onPress={() => selectGoalScorer('Opponent')}><Text style={styles.benchBtnText}>{opponentName || 'Opponent'} Team ⚽</Text></TouchableOpacity>
-              {(onPitchPlayers || []).map(p => p && (
-                <TouchableOpacity key={p.id} style={styles.liveActionBtnRow} onPress={() => selectGoalScorer(p)}><Text style={styles.liveActionTextRow}>{p.name}</Text></TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setLiveEventMode('none')}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={liveEventMode === 'goal_assist'} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setLiveEventMode('none')} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Who Assisted? ({pendingEvent?.minute})</Text>
-            <ScrollView style={{ maxHeight: 300 }}>
-              <TouchableOpacity style={[styles.benchBtn, { backgroundColor: '#2E3A44' }]} onPress={() => selectGoalAssist('None')}><Text style={styles.benchBtnText}>No Assist</Text></TouchableOpacity>
-              {(onPitchPlayers || []).map(p => p && (
-                <TouchableOpacity key={p.id} style={styles.liveActionBtnRow} onPress={() => selectGoalAssist(p)}><Text style={styles.liveActionTextRow}>{p.name}</Text></TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setLiveEventMode('none')}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={liveEventMode === 'card_type'} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setLiveEventMode('none')} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Log Disciplinary ({pendingEvent?.minute})</Text>
-            <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'space-around' }}>
-              <TouchableOpacity style={[styles.liveActionBtn, { borderColor: '#eab308', borderWidth: 2 }]} onPress={() => selectCardType('yellow')}><Text style={styles.liveActionIcon}>🟨</Text><Text style={styles.liveActionText}>Yellow Card</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.liveActionBtn, { borderColor: '#ef4444', borderWidth: 2 }]} onPress={() => selectCardType('red')}><Text style={styles.liveActionIcon}>🟥</Text><Text style={styles.liveActionText}>Red Card</Text></TouchableOpacity>
-            </View>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setLiveEventMode('none')}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={liveEventMode === 'card_player'} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setLiveEventMode('none')} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Who got the {pendingEvent?.cardType === 'yellow' ? 'Yellow' : 'Red'} Card?</Text>
-            <ScrollView style={{ maxHeight: 300 }}>
-              <TouchableOpacity style={[styles.benchBtn, { backgroundColor: '#7f1d1d' }]} onPress={() => finishCardFlow('Opponent')}><Text style={styles.benchBtnText}>{opponentName || 'Opponent'} Team</Text></TouchableOpacity>
-              {(teamSheet || []).map(p => p && (
-                <TouchableOpacity key={p.id} style={styles.liveActionBtnRow} onPress={() => finishCardFlow(p)}><Text style={styles.liveActionTextRow}>{p.name} {p.is_starter ? '(Pitch)' : '(Bench)'}</Text></TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setLiveEventMode('none')}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={liveEventMode === 'coach_motm'} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setLiveEventMode('none')} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Select Coach's Player of the Match ⭐</Text>
-            <ScrollView style={{ maxHeight: 300 }}>
-              {(teamSheet || []).map(p => p && (
-                <TouchableOpacity key={p.id} style={styles.liveActionBtnRow} onPress={() => selectCoachMotm(p)}><Text style={styles.liveActionTextRow}>#{p.squad_number || ''} {p.name}</Text></TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setLiveEventMode('none')}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={liveEventMode === 'parent_motm'} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setLiveEventMode('none')} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Vote Fans' Player of the Match 🌟</Text>
-            <ScrollView style={{ maxHeight: 300 }}>
-              {(teamSheet || []).map(p => p && (
-                <TouchableOpacity key={p.id} style={styles.liveActionBtnRow} onPress={() => selectParentMotm(p)}><Text style={styles.liveActionTextRow}>#{p.squad_number || ''} {p.name}</Text></TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setLiveEventMode('none')}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={liveEventMode === 'sub_selection'} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setLiveEventMode('none')} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>
-              {pendingEvent?.isSubbingOff 
-                ? `Who is coming ON for ${pendingEvent?.sourcePlayer?.name}?` 
-                : `Who is coming OFF for ${pendingEvent?.sourcePlayer?.name}?`}
-            </Text>
-            <ScrollView style={{ maxHeight: 300 }}>
-              {(pendingEvent?.isSubbingOff ? subs : onPitchPlayers).map(p => p && (
-                <TouchableOpacity key={p.id} style={styles.liveActionBtnRow} onPress={() => promptSubReason(p)}>
-                  <Text style={styles.liveActionTextRow}>#{p.squad_number || ''} {p.name} {p.is_starter ? `(${p.matchday_position})` : ''}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setLiveEventMode('none')}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -3007,132 +2919,6 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* EDIT PLAYER PROFILE MODAL */}
-      <Modal visible={!!editingPlayer} transparent={true} animationType="slide">
-        <View style={styles.modalOverlayFull}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setEditingPlayer(null)} />
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center' }} pointerEvents="box-none">
-            <View style={[styles.modalBoxFull, { maxHeight: '85%', flexShrink: 1 }]}>
-              <ScrollView style={{ flexGrow: 0 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
-                <Text style={styles.modalTitle}>Full Player Profile</Text>
-                
-                <Text style={styles.inputLabel}>Name & Jersey #:</Text>
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TextInput style={[styles.input, { flex: 1 }]} value={editingPlayer?.name || ''} onChangeText={(val) => setEditingPlayer(prev => prev ? { ...prev, name: val } : null)} />
-                  <TextInput style={[styles.input, { width: 60, textAlign: 'center' }]} keyboardType="numeric" value={editingPlayer?.squad_number ? String(editingPlayer.squad_number) : ''} onChangeText={(val) => setEditingPlayer(prev => prev ? { ...prev, squad_number: val } : null)} />
-                </View>
-
-                <Text style={[styles.inputLabel, { marginTop: 10 }]}>Dominant Foot (Left to Right):</Text>
-                <View style={styles.footednessContainer}>
-                  <Text style={styles.footLabel}>L</Text>
-                  {[1, 2, 3, 4, 5].map(val => (
-                    <TouchableOpacity 
-                      key={val} 
-                      onPress={() => setEditingPlayer(prev => prev ? {...prev, footedness: val} : null)}
-                      style={[styles.footDot, editingPlayer?.footedness === val && styles.footDotActive]}
-                    />
-                  ))}
-                  <Text style={styles.footLabel}>R</Text>
-                </View>
-
-                <Text style={[styles.inputLabel, { marginTop: 15, color: '#39FF14' }]}>Primary Position (Coach Assigned):</Text>
-                <View style={styles.positionGrid}>
-                  {(profilePositions || []).map(pos => (
-                    <TouchableOpacity key={pos} style={[styles.gridBtn, editingPlayer?.position === pos && { backgroundColor: '#39FF14' }]} onPress={() => setEditingPlayer(prev => prev ? { ...prev, position: pos } : null)}>
-                      <Text style={[styles.gridBtnText, editingPlayer?.position === pos && { color: '#0B0E14' }]}>{pos}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={[styles.inputLabel, { color: '#3b82f6' }]}>Secondary Position (Coach Assigned):</Text>
-                <View style={styles.positionGrid}>
-                  {(profileSecondaryPositions || []).map(pos => (
-                    <TouchableOpacity key={pos} style={[styles.gridBtn, editingPlayer?.secondary_position === pos && { backgroundColor: '#3b82f6' }]} onPress={() => setEditingPlayer(prev => prev ? { ...prev, secondary_position: pos } : null)}>
-                      <Text style={styles.gridBtnText}>{pos}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={styles.sectionHeaderModal}>Physical Attributes</Text>
-                {getPosCategory(editingPlayer?.position) !== 'GK' && render1to10Row('Sprint Speed', 'phys_sprint')}
-                {getPosCategory(editingPlayer?.position) !== 'GK' && render1to10Row('Acceleration', 'phys_accel')}
-                {getPosCategory(editingPlayer?.position) !== 'GK' && render1to10Row('Stamina', 'phys_stamina')}
-                {render1to10Row('Strength', 'phys_strength')}
-                {render1to10Row('Agility & Balance', 'phys_agility')}
-
-                <Text style={styles.sectionHeaderModal}>Technical Abilities</Text>
-                {render1to10Row('First Touch', 'tech_first_touch')}
-                {render1to10Row('Short Pass', 'tech_short_pass')}
-                
-                {getPosCategory(editingPlayer?.position) === 'GK' ? (
-                  <>
-                    {render1to10Row('Shot Stopping', 'gk_shot_stopping')}
-                    {render1to10Row('Handling / Catching', 'gk_handling')}
-                    {render1to10Row('1v1 / Rushing', 'gk_1v1')}
-                    {render1to10Row('Aerial Command', 'gk_aerial')}
-                    {render1to10Row('Sweeping', 'gk_sweeping')}
-                    {render1to10Row('Distribution', 'gk_distribution')}
-                  </>
-                ) : (
-                  <>
-                    {render1to10Row('Dribbling', 'tech_dribbling')}
-                    {render1to10Row('Long Pass', 'tech_long_pass')}
-                    {render1to10Row('Shooting Accuracy', 'tech_shooting_acc')}
-                    {render1to10Row('Shooting Power', 'tech_shooting_pow')}
-                    {render1to10Row('Crossing', 'tech_crossing')}
-                    {render1to10Row('Tackling', 'tech_tackling')}
-                    {render1to10Row('Interceptions', 'tech_intercept')}
-                    {render1to10Row('Heading / Aerial', 'tech_aerial')}
-                    {render1to10Row('Attacking Position', 'tech_positioning')}
-                  </>
-                )}
-
-                <Text style={styles.sectionHeaderModal}>Tactical & Psychological</Text>
-                {getPosCategory(editingPlayer?.position) !== 'GK' && render1to10Row('Awareness of Space', 'tact_awareness')}
-                {getPosCategory(editingPlayer?.position) !== 'GK' && render1to10Row('Pressing Intelligence', 'tact_pressing')}
-                {getPosCategory(editingPlayer?.position) !== 'GK' && render1to10Row('Follow Instructions', 'tact_instructions')}
-                {getPosCategory(editingPlayer?.position) !== 'GK' && render1to10Row('Workrate', 'psych_workrate')}
-                
-                {render1to10Row('Decision Making', 'tact_decision')}
-                {render1to10Row('Confidence Level', 'psych_confidence')}
-                {render1to10Row('Leadership', 'psych_leadership')}
-                {render1to10Row('Composure', 'psych_composure')}
-
-                <Text style={styles.sectionHeaderModal}>Observations</Text>
-                <Text style={styles.inputLabel}>Weaknesses to Improve:</Text>
-                <TextInput style={[styles.input, { height: 60, textAlignVertical: 'top' }]} multiline value={editingPlayer?.notes_weaknesses || ''} onChangeText={(val) => setEditingPlayer(prev => prev ? { ...prev, notes_weaknesses: val } : null)} />
-                
-                <Text style={styles.inputLabel}>Communication (Notes):</Text>
-                <TextInput style={[styles.input, { height: 60, textAlignVertical: 'top' }]} multiline value={editingPlayer?.notes_communication || ''} onChangeText={(val) => setEditingPlayer(prev => prev ? { ...prev, notes_communication: val } : null)} />
-
-                <Text style={styles.inputLabel}>Generic Notes:</Text>
-                <TextInput style={[styles.input, { height: 60, textAlignVertical: 'top' }]} multiline value={editingPlayer?.coach_development_notes || ''} onChangeText={(val) => setEditingPlayer(prev => prev ? { ...prev, coach_development_notes: val } : null)} />
-
-                {(profile?.role === 'coach' && appMode === 'coach') ? (
-                  <>
-                    <Text style={styles.sectionHeaderModal}>Coach-Only Analytics</Text>
-                    <Text style={[styles.inputLabel, { color: '#39FF14' }]}>Total Match Minutes Played:</Text>
-                    <TextInput 
-                      style={styles.input} 
-                      keyboardType="numeric" 
-                      value={String(editingPlayer?.total_minutes_played || 0)} 
-                      onChangeText={(val) => setEditingPlayer(prev => prev ? { ...prev, total_minutes_played: parseInt(val) || 0 } : null)} 
-                    />
-                  </>
-                ) : null}
-
-                <TouchableOpacity style={styles.primaryAuthBtn} onPress={updateFullPlayerProfile}><Text style={styles.primaryAuthBtnText}>Save Profile Updates</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.benchBtn} onPress={() => { assignPlayerRole(editingPlayer, 'Bench', false); setEditingPlayer(null); }}><Text style={styles.benchBtnText}>🔄 Drop to Bench</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.deleteBtn, { marginTop: 15, marginBottom: 30 }]} onPress={() => initiateDeletePlayer(editingPlayer)}><Text style={styles.deleteBtnText}>🗑️ Delete Player</Text></TouchableOpacity>
-                
-                <View style={{ height: 20 }} />
-              </ScrollView>
-              <TouchableOpacity style={[styles.cancelBtn, { marginTop: 10 }]} onPress={() => setEditingPlayer(null)}><Text style={styles.cancelBtnText}>Close</Text></TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
-
       {/* ADD PLAYER QUICK SETUP MODAL */}
       <Modal visible={isAddPlayerModalOpen} transparent={true} animationType="slide">
         <View style={styles.modalOverlayFull}>
@@ -3175,93 +2961,6 @@ export default function App() {
               <TouchableOpacity style={[styles.cancelBtn, { marginTop: 10 }]} onPress={() => setIsAddPlayerModalOpen(false)}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
-        </View>
-      </Modal>
-
-      {/* UNIFIED PDF EXPORT MODAL */}
-      <Modal
-        visible={isPdfExportModalOpen}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setIsPdfExportModalOpen(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            {pdfExportStep === 'type' ? (
-              <>
-                <Text style={styles.modalTitle}>📄 EXPORT BRANDED PDF</Text>
-                <Text style={{ color: '#94A3B8', fontSize: 12, marginBottom: 15, textAlign: 'center' }}>Select the report format to generate:</Text>
-
-                <TouchableOpacity
-                  style={styles.inviteRow}
-                  onPress={() => {
-                    setIsPdfExportModalOpen(false);
-                    exportMatchdaySummary();
-                  }}
-                >
-                  <View>
-                    <Text style={styles.inviteName}>🏆 Full Team Season Report</Text>
-                    <Text style={[styles.inviteCodeText, { color: '#64748B', marginTop: 2, fontWeight: 'normal' }]}>Complete team record, honours, squad stats</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.inviteRow}
-                  onPress={() => setPdfExportStep('player_select')}
-                >
-                  <View>
-                    <Text style={styles.inviteName}>👤 Individual Player Report</Text>
-                    <Text style={[styles.inviteCodeText, { color: '#64748B', marginTop: 2, fontWeight: 'normal' }]}>360° matrix, match stats, and notes</Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.cancelBtn, { marginTop: 10 }]}
-                  onPress={() => setIsPdfExportModalOpen(false)}
-                >
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <Text style={styles.modalTitle}>Select Player</Text>
-                  <TouchableOpacity onPress={() => setPdfExportStep('type')}>
-                    <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 12 }}>⬅ Back</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <ScrollView style={{ maxHeight: 300, width: '100%' }}>
-                  {(teamSheet || []).map((p) => (
-                    <TouchableOpacity
-                      key={p.id}
-                      style={styles.inviteRow}
-                      onPress={async () => {
-                        setIsPdfExportModalOpen(false);
-                        const currentTeam = myTeams.find(t => t.id === activeTeamId);
-                        await generatePlayerReportCard({
-                          player: p,
-                          teamName: currentTeam?.name || activeTeamObj?.name || 'Tactical Engine Squad',
-                          ageGroup: currentTeam?.age_group || effectiveAgeGroup || 'Youth',
-                          clubLogoUrl: currentTeam?.logo_url || teamLogoUrl || null
-                        });
-                      }}
-                    >
-                      <Text style={styles.inviteName}>#{p.squad_number || 0} {p.name}</Text>
-                      <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 12 }}>{p.position || 'CM'} ➔</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-
-                <TouchableOpacity
-                  style={[styles.cancelBtn, { marginTop: 10 }]}
-                  onPress={() => setIsPdfExportModalOpen(false)}
-                >
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
         </View>
       </Modal>
 
