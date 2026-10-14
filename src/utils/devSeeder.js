@@ -3,6 +3,9 @@ import { supabase } from '../supabase';
 import { enqueueOfflineEvent, flushOfflineQueue, getOfflineQueue } from './offlineQueue';
 import { getPosCategory } from './positionHelpers';
 
+// Helper to generate a random integer between min and max (inclusive)
+const randAttr = (min = 4, max = 9) => Math.floor(Math.random() * (max - min + 1)) + min;
+
 /**
  * Dev Tool: Seeds a balanced 16-player roster into Supabase for the active team.
  */
@@ -47,8 +50,12 @@ export const seedFullTeamRoster = async ({
               { name: 'Lucas Wood', num: 22, pos: 'GK/SGK', sec: 'None', foot: 4 },
             ];
 
-            const playerRecords = mockRoster.map(p => {
-              const famCode = `${p.name.substring(0, 3).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
+            const playerRecords = mockRoster.map((p) => {
+              const timeSuffix = Date.now().toString().slice(-3);
+              const randSuffix = Math.floor(100 + Math.random() * 900);
+              const famCode = `${p.name.substring(0, 3).toUpperCase()}-${timeSuffix}${randSuffix}`;
+              const isGk = getPosCategory(p.pos) === 'GK' || p.pos === 'GK/SGK';
+
               return {
                 team_id: activeTeamId,
                 name: p.name,
@@ -61,12 +68,45 @@ export const seedFullTeamRoster = async ({
                 family_code: famCode,
                 footedness: p.foot,
                 apps: 0, goals: 0, assists: 0, tackles: 0, interceptions: 0, saves: 0, clean_sheets: 0, yellow_cards: 0, red_cards: 0, motm: 0, parent_motm: 0, total_minutes_played: 0,
-                phys_sprint: 6, phys_accel: 6, phys_stamina: 6, phys_strength: 6, phys_agility: 6,
-                tech_first_touch: 6, tech_dribbling: 6, tech_short_pass: 6, tech_long_pass: 6, tech_shooting_acc: 6, tech_shooting_pow: 6, tech_crossing: 6, tech_tackling: 6, tech_intercept: 6, tech_aerial: 6, tech_positioning: 6,
-                gk_shot_stopping: 6, gk_handling: 6, gk_1v1: 6, gk_aerial: 6, gk_sweeping: 6, gk_distribution: 6,
-                tact_awareness: 6, tact_pressing: 6, tact_instructions: 6, tact_decision: 6,
-                psych_confidence: 6, psych_aggression: 6, psych_leadership: 6, psych_workrate: 6, psych_composure: 6,
-                notes_weaknesses: '', notes_communication: '', coach_development_notes: '',
+
+                phys_sprint: randAttr(4, 9),
+                phys_accel: randAttr(4, 9),
+                phys_stamina: randAttr(4, 9),
+                phys_strength: randAttr(4, 9),
+                phys_agility: randAttr(4, 9),
+
+                tech_first_touch: randAttr(4, 9),
+                tech_dribbling: randAttr(4, 9),
+                tech_short_pass: randAttr(4, 9),
+                tech_long_pass: randAttr(4, 9),
+                tech_shooting_acc: randAttr(4, 9),
+                tech_shooting_pow: randAttr(4, 9),
+                tech_crossing: randAttr(4, 9),
+                tech_tackling: randAttr(4, 9),
+                tech_intercept: randAttr(4, 9),
+                tech_aerial: randAttr(4, 9),
+                tech_positioning: randAttr(4, 9),
+
+                gk_shot_stopping: isGk ? randAttr(6, 9) : randAttr(2, 4),
+                gk_handling: isGk ? randAttr(6, 9) : randAttr(2, 4),
+                gk_1v1: isGk ? randAttr(6, 9) : randAttr(2, 4),
+                gk_aerial: isGk ? randAttr(6, 9) : randAttr(2, 4),
+                gk_sweeping: isGk ? randAttr(6, 9) : randAttr(2, 4),
+                gk_distribution: isGk ? randAttr(6, 9) : randAttr(2, 4),
+
+                tact_awareness: randAttr(4, 9),
+                tact_pressing: randAttr(4, 9),
+                tact_instructions: randAttr(4, 9),
+                tact_decision: randAttr(4, 9),
+                psych_confidence: randAttr(4, 9),
+                psych_aggression: randAttr(4, 9),
+                psych_leadership: randAttr(4, 9),
+                psych_workrate: randAttr(4, 9),
+                psych_composure: randAttr(4, 9),
+
+                notes_weaknesses: '',
+                notes_communication: '',
+                coach_development_notes: '',
                 position_minutes: {}
               };
             });
@@ -76,7 +116,7 @@ export const seedFullTeamRoster = async ({
 
             if (fetchTeamData) await fetchTeamData(userId, activeTeamId);
             if (setLoading) setLoading(false);
-            Alert.alert("Roster Populated ⚽", "16 balanced player profiles generated for this team!");
+            Alert.alert("Roster Populated ⚽", "16 balanced player profiles with randomized attributes generated for this team!");
           } catch (err) {
             if (setLoading) setLoading(false);
             console.error(err);
@@ -89,7 +129,7 @@ export const seedFullTeamRoster = async ({
 };
 
 /**
- * Dev Tool: Seeds realistic season stats & 20 match history records into Supabase.
+ * Dev Tool: Seeds realistic season stats & 20 match history records with weekly date spacing into Supabase.
  */
 export const seedSeasonStats = async ({
   activeTeamId,
@@ -198,6 +238,9 @@ export const seedSeasonStats = async ({
               let teamScore = res === 'W' ? 3 : res === 'D' ? 1 : 0;
               let oppScore = res === 'W' ? 1 : res === 'D' ? 1 : 2;
 
+              // Generate weekly past dates (i = 0 is today, i = 1 is 7 days ago, etc.)
+              const matchDate = new Date(Date.now() - i * 7 * 24 * 60 * 60 * 1000);
+
               return {
                 team_id: activeTeamId,
                 opponent_name: opp,
@@ -205,6 +248,7 @@ export const seedSeasonStats = async ({
                 team_score: teamScore,
                 opponent_score: oppScore,
                 result: res,
+                created_at: matchDate.toISOString(),
                 ticker_events: [
                   { minute: "12'", icon: "⚽", message: `GOAL! ${teamSheet[i % teamSheet.length]?.name || 'Striker'} ⚽` },
                   { minute: "34'", icon: "🟨", message: `Yellow Card: ${opp}` },
@@ -221,7 +265,7 @@ export const seedSeasonStats = async ({
             if (fetchMatchHistory) await fetchMatchHistory(activeTeamId);
 
             if (setLoading) setLoading(false);
-            Alert.alert("Success ⚽", "Full season statistics and 20 match reports populated!");
+            Alert.alert("Success ⚽", "Full season statistics and 20 dated match reports populated!");
           } catch (err) {
             if (setLoading) setLoading(false);
             console.error(err);
@@ -265,7 +309,6 @@ export const testOfflineQueueFlow = async (activeTeamId) => {
         onPress: async () => {
           const result = await flushOfflineQueue();
           
-          // Small delay gives iOS time to complete the modal dismiss animation
           setTimeout(() => {
             Alert.alert(
               "⚡ Queue Flushed",

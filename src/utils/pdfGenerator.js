@@ -1,6 +1,7 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Alert, Platform } from 'react-native';
+import { formatUkDate, getCurrentFootballSeason } from './dateHelpers';
 
 const fetchBase64Image = async (url) => {
   if (!url || typeof url !== 'string' || !url.startsWith('http')) return null;
@@ -75,6 +76,10 @@ export const generateSeasonPdfReport = async ({
       ? `<img src="${footerLogoBase64}" class="footer-logo" alt="Powered by Tactical Engine" />`
       : fallbackFooterSvg;
 
+    // Dynamic Season Label and UK Date
+    const currentSeason = getCurrentFootballSeason();
+    const generatedDate = formatUkDate();
+
     // Team Record Analytics
     const totalMatches = matchHistory.length;
     const wins = matchHistory.filter(m => m.result === 'W').length;
@@ -118,24 +123,24 @@ export const generateSeasonPdfReport = async ({
 
       return `
         <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
-          <td class="stat-green" style="padding: 7px 8px; font-weight: bold; text-align: center;">#${p.squad_number || '-'}</td>
-          <td class="text-primary" style="padding: 7px 8px; font-weight: bold;">${p.name || 'Player'}</td>
-          <td class="pos-text" style="padding: 7px 8px; text-align: center;">${p.position || 'N/A'}</td>
-          <td class="text-primary" style="padding: 7px 8px; text-align: center;">${p.apps || 0}</td>
-          <td class="text-sub" style="padding: 7px 8px; text-align: center;">${totalMins}m (${avgMins}m/g)</td>
-          <td class="stat-green" style="padding: 7px 8px; text-align: center; font-weight: bold;">${p.goals || 0}</td>
-          <td class="text-primary" style="padding: 7px 8px; text-align: center;">${p.assists || 0}</td>
-          <td class="text-primary" style="padding: 7px 8px; text-align: center;">${totalPotm}</td>
+          <td class="stat-green" style="padding: 5px 6px; font-weight: bold; text-align: center;">#${p.squad_number || '-'}</td>
+          <td class="text-primary" style="padding: 5px 6px; font-weight: bold;">${p.name || 'Player'}</td>
+          <td class="pos-text" style="padding: 5px 6px; text-align: center;">${p.position || 'N/A'}</td>
+          <td class="text-primary" style="padding: 5px 6px; text-align: center;">${p.apps || 0}</td>
+          <td class="text-sub" style="padding: 5px 6px; text-align: center;">${totalMins}m (${avgMins}m/g)</td>
+          <td class="stat-green" style="padding: 5px 6px; text-align: center; font-weight: bold;">${p.goals || 0}</td>
+          <td class="text-primary" style="padding: 5px 6px; text-align: center;">${p.assists || 0}</td>
+          <td class="text-primary" style="padding: 5px 6px; text-align: center;">${totalPotm}</td>
         </tr>
       `;
     }).join('');
 
     const matchRowsHtml = (matchHistory || []).map((m, idx) => `
       <tr class="${idx % 2 === 0 ? 'row-even' : 'row-odd'}">
-        <td class="text-sub" style="padding: 7px 8px;">${m.created_at ? new Date(m.created_at).toLocaleDateString() : 'Season Match'}</td>
-        <td class="text-primary" style="padding: 7px 8px; font-weight: bold;">vs ${m.opponent_name || m.opponent || 'Opponent'}</td>
-        <td class="stat-green" style="padding: 7px 8px; font-weight: bold; text-align: center;">${m.team_score ?? 0} - ${m.opponent_score ?? 0}</td>
-        <td class="text-primary" style="padding: 7px 8px; text-align: center;">${m.result || 'D'} (${m.match_type || 'Match'})</td>
+        <td class="text-sub" style="padding: 6px 8px;">${m.created_at ? formatUkDate(new Date(m.created_at)) : 'Season Match'}</td>
+        <td class="text-primary" style="padding: 6px 8px; font-weight: bold;">vs ${m.opponent_name || m.opponent || 'Opponent'}</td>
+        <td class="stat-green" style="padding: 6px 8px; font-weight: bold; text-align: center;">${m.team_score ?? 0} - ${m.opponent_score ?? 0}</td>
+        <td class="text-primary" style="padding: 6px 8px; text-align: center;">${m.result || 'D'} (${m.match_type || 'Match'})</td>
       </tr>
     `).join('');
 
@@ -148,19 +153,19 @@ export const generateSeasonPdfReport = async ({
           <title>Executive Season Report</title>
           <style>
             * { box-sizing: border-box; }
-            body { background-color: #FFFFFF; color: #0F172A; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 20px; }
-            .header-table { width: 100%; border-bottom: 3px solid #15803D; padding-bottom: 12px; margin-bottom: 16px; }
-            .team-title { font-size: 24px; font-weight: 800; color: #0F172A; text-transform: uppercase; letter-spacing: 1px; margin: 0; }
-            .team-sub { font-size: 11px; color: #15803D; font-weight: bold; text-transform: uppercase; margin-top: 4px; }
-            .card { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
+            body { background-color: #FFFFFF; color: #0F172A; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 18px 22px; }
+            .header-table { width: 100%; border-bottom: 3px solid #15803D; padding-bottom: 8px; margin-bottom: 12px; }
+            .team-title { font-size: 22px; font-weight: 800; color: #0F172A; text-transform: uppercase; letter-spacing: 1px; margin: 0; }
+            .team-sub { font-size: 10.5px; color: #15803D; font-weight: bold; text-transform: uppercase; margin-top: 3px; }
+            .card { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 12px; margin-bottom: 11px; }
             .page-break { page-break-before: always !important; break-before: page !important; }
-            .card-title { color: #15803D; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
-            .honours-grid { display: table; width: 100%; margin-bottom: 4px; }
-            .honours-col { display: table-cell; width: 25%; vertical-align: top; padding-right: 8px; }
-            .honour-label { font-size: 9px; font-weight: bold; color: #64748B; text-transform: uppercase; }
-            .honour-value { font-size: 11px; font-weight: bold; color: #0F172A; margin-top: 2px; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th { background-color: #E2E8F0; color: #0F172A; text-align: left; padding: 8px 10px; font-weight: bold; text-transform: uppercase; }
+            .card-title { color: #15803D; font-size: 11.5px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+            .honours-grid { display: table; width: 100%; margin-bottom: 2px; }
+            .honours-col { display: table-cell; width: 25%; vertical-align: top; padding-right: 6px; }
+            .honour-label { font-size: 8.5px; font-weight: bold; color: #64748B; text-transform: uppercase; }
+            .honour-value { font-size: 10.5px; font-weight: bold; color: #0F172A; margin-top: 2px; }
+            table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+            th { background-color: #E2E8F0; color: #0F172A; text-align: left; padding: 6px 8px; font-weight: bold; text-transform: uppercase; }
             .row-even { background-color: #FFFFFF; border-bottom: 1px solid #E2E8F0; }
             .row-odd { background-color: #F8FAFC; border-bottom: 1px solid #E2E8F0; }
             .text-primary { color: #0F172A; }
@@ -168,17 +173,19 @@ export const generateSeasonPdfReport = async ({
             .pos-text { color: #334155; font-weight: bold; }
             .stat-green { color: #15803D; }
             .header-logo-cell { text-align: right; vertical-align: middle; width: 120px; }
-            .header-logo { max-width: 110px; max-height: 50px; width: auto; height: auto; object-fit: contain; border-radius: 4px; }
-            .footer { margin-top: 30px; border-top: 1px solid #E2E8F0; padding-top: 15px; text-align: center; }
-            .footer-logo { max-width: 220px; max-height: 38px; width: auto; height: auto; object-fit: contain; }
+            .header-logo { max-width: 110px; max-height: 44px; width: auto; height: auto; object-fit: contain; border-radius: 4px; }
+            .footer { margin-top: 14px; border-top: 1px solid #E2E8F0; padding-top: 8px; text-align: center; }
+            .footer-tag { font-size: 9.5px; color: #64748B; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+            .footer-logo { max-width: 200px; max-height: 28px; width: auto; height: auto; object-fit: contain; display: inline-block; }
           </style>
         </head>
         <body>
+          <!-- ================= PAGE 1: SQUAD OVERVIEW & STATS ================= -->
           <table class="header-table">
             <tr>
               <td style="vertical-align: middle;">
                 <h1 class="team-title">${teamName}</h1>
-                <div class="team-sub">${ageGroup} AGE GROUP • EXECUTIVE SEASON PERFORMANCE REPORT</div>
+                <div class="team-sub">${ageGroup} AGE GROUP • ${currentSeason.toUpperCase()} • REPORTED: ${generatedDate}</div>
               </td>
               <td class="header-logo-cell">${headerLogoHtml}</td>
             </tr>
@@ -227,7 +234,7 @@ export const generateSeasonPdfReport = async ({
           ${scoutNotes ? `
             <div class="card">
               <div class="card-title">HEAD COACH SEASON REVIEW</div>
-              <p class="text-primary" style="font-size: 11px; line-height: 1.4; margin: 0;">${scoutNotes}</p>
+              <p class="text-primary" style="font-size: 10px; line-height: 1.35; margin: 0;">${scoutNotes}</p>
             </div>
           ` : ''}
 
@@ -247,13 +254,30 @@ export const generateSeasonPdfReport = async ({
                 </tr>
               </thead>
               <tbody>
-                ${playerRowsHtml.length > 0 ? playerRowsHtml : '<tr><td colspan="8" class="text-sub" style="padding:8px; text-align:center;">No player data available.</td></tr>'}
+                ${playerRowsHtml.length > 0 ? playerRowsHtml : '<tr><td colspan="8" class="text-sub" style="padding:6px; text-align:center;">No player data available.</td></tr>'}
               </tbody>
             </table>
           </div>
 
-          <div class="card page-break">
-            <div class="card-title">SEASON MATCH ARCHIVE</div>
+          <!-- PAGE 1 FOOTER -->
+          <div class="footer">
+            <div class="footer-tag">${teamName} • ${currentSeason}</div>
+            <div>${footerLogoHtml}</div>
+          </div>
+
+          <!-- ================= PAGE 2: SEASON MATCH ARCHIVE ================= -->
+          <table class="header-table page-break">
+            <tr>
+              <td style="vertical-align: middle;">
+                <h1 class="team-title">${teamName}</h1>
+                <div class="team-sub">${ageGroup} AGE GROUP • ${currentSeason.toUpperCase()} • SEASON MATCH ARCHIVE</div>
+              </td>
+              <td class="header-logo-cell">${headerLogoHtml}</td>
+            </tr>
+          </table>
+
+          <div class="card">
+            <div class="card-title">SEASON MATCH ARCHIVE & RESULTS RECORD</div>
             <table>
               <thead>
                 <tr>
@@ -269,7 +293,11 @@ export const generateSeasonPdfReport = async ({
             </table>
           </div>
 
-          <div class="footer">${footerLogoHtml}</div>
+          <!-- PAGE 2 FOOTER -->
+          <div class="footer">
+            <div class="footer-tag">${teamName} • ${currentSeason}</div>
+            <div>${footerLogoHtml}</div>
+          </div>
         </body>
       </html>
     `;
@@ -341,6 +369,10 @@ export const generatePlayerReportCard = async ({
     const footerLogoHtml = footerLogoBase64
       ? `<img src="${footerLogoBase64}" class="footer-logo" alt="Powered by Tactical Engine" />`
       : fallbackFooterSvg;
+
+    // Dynamic Season Label and UK Date
+    const currentSeason = getCurrentFootballSeason();
+    const generatedDate = formatUkDate();
 
     // ⚡ DYNAMIC STAT CALCULATIONS FROM REAL SUPABASE 1-10 FIELDS (Scaled to 0-100%)
     const calcAvgScaled = (arr) => {
@@ -420,32 +452,33 @@ export const generatePlayerReportCard = async ({
           <title>Player Development Report Card</title>
           <style>
             * { box-sizing: border-box; }
-            body { background-color: #FFFFFF; color: #0F172A; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 24px; }
-            .header-table { width: 100%; border-bottom: 3px solid #15803D; padding-bottom: 12px; margin-bottom: 20px; }
-            .title { font-size: 22px; font-weight: 800; color: #0F172A; text-transform: uppercase; letter-spacing: 1px; margin: 0; }
-            .subtitle { font-size: 11px; color: #15803D; font-weight: bold; text-transform: uppercase; margin-top: 4px; }
+            body { background-color: #FFFFFF; color: #0F172A; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 20px 24px; }
+            .header-table { width: 100%; border-bottom: 3px solid #15803D; padding-bottom: 8px; margin-bottom: 14px; }
+            .title { font-size: 20px; font-weight: 800; color: #0F172A; text-transform: uppercase; letter-spacing: 1px; margin: 0; }
+            .subtitle { font-size: 10.5px; color: #15803D; font-weight: bold; text-transform: uppercase; margin-top: 3px; }
             .header-logo-cell { text-align: right; vertical-align: middle; width: 120px; }
-            .header-logo { max-width: 110px; max-height: 50px; width: auto; height: auto; object-fit: contain; border-radius: 4px; }
-            .player-card { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-            .player-name { font-size: 20px; font-weight: bold; color: #0F172A; }
-            .player-meta { font-size: 12px; color: #15803D; font-weight: bold; margin-top: 4px; }
-            .ovr-badge { background-color: #15803D; color: #FFFFFF; font-size: 22px; font-weight: 900; width: 52px; height: 52px; border-radius: 26px; display: flex; align-items: center; justify-content: center; }
-            .card { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px; margin-bottom: 18px; }
-            .card-title { color: #15803D; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+            .header-logo { max-width: 110px; max-height: 44px; width: auto; height: auto; object-fit: contain; border-radius: 4px; }
+            .player-card { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 14px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
+            .player-name { font-size: 18px; font-weight: bold; color: #0F172A; }
+            .player-meta { font-size: 11px; color: #15803D; font-weight: bold; margin-top: 3px; }
+            .ovr-badge { background-color: #15803D; color: #FFFFFF; font-size: 20px; font-weight: 900; width: 48px; height: 48px; border-radius: 24px; display: flex; align-items: center; justify-content: center; }
+            .card { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 12px; margin-bottom: 14px; }
+            .card-title { color: #15803D; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
             .metrics-grid { display: table; width: 100%; }
             .metric-col { display: table-cell; width: 20%; text-align: center; }
-            .metric-label { font-size: 9px; font-weight: bold; color: #64748B; text-transform: uppercase; }
-            .metric-val { font-size: 15px; font-weight: bold; color: #0F172A; margin-top: 2px; }
-            .matrix-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-            .stat-box { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 12px; }
-            .stat-label { font-size: 10px; color: #64748B; text-transform: uppercase; font-weight: bold; }
-            .stat-val { font-size: 16px; font-weight: bold; color: #15803D; margin-top: 4px; }
-            .bar-bg { background-color: #E2E8F0; height: 6px; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+            .metric-label { font-size: 8.5px; font-weight: bold; color: #64748B; text-transform: uppercase; }
+            .metric-val { font-size: 14px; font-weight: bold; color: #0F172A; margin-top: 2px; }
+            .matrix-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+            .stat-box { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px; }
+            .stat-label { font-size: 9.5px; color: #64748B; text-transform: uppercase; font-weight: bold; }
+            .stat-val { font-size: 15px; font-weight: bold; color: #15803D; margin-top: 3px; }
+            .bar-bg { background-color: #E2E8F0; height: 6px; border-radius: 3px; margin-top: 6px; overflow: hidden; }
             .bar-fill { background-color: #15803D; height: 100%; }
-            .note-header { font-size: 10px; color: #15803D; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }
-            .notes-text { font-size: 11px; color: #334155; line-height: 1.5; margin: 0 0 10px 0; }
-            .footer { margin-top: 30px; border-top: 1px solid #E2E8F0; padding-top: 15px; text-align: center; }
-            .footer-logo { max-width: 220px; max-height: 38px; width: auto; height: auto; object-fit: contain; }
+            .note-header { font-size: 9.5px; color: #15803D; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }
+            .notes-text { font-size: 10.5px; color: #334155; line-height: 1.45; margin: 0 0 8px 0; }
+            .footer { margin-top: 14px; border-top: 1px solid #E2E8F0; padding-top: 8px; text-align: center; }
+            .footer-tag { font-size: 9.5px; color: #64748B; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+            .footer-logo { max-width: 200px; max-height: 28px; width: auto; height: auto; object-fit: contain; display: inline-block; }
           </style>
         </head>
         <body>
@@ -453,7 +486,7 @@ export const generatePlayerReportCard = async ({
             <tr>
               <td style="vertical-align: middle;">
                 <h1 class="title">Player Development Report</h1>
-                <div class="subtitle">${teamName} • ${ageGroup} AGE GROUP</div>
+                <div class="subtitle">${teamName} • ${ageGroup} AGE GROUP • ${currentSeason.toUpperCase()} • REPORTED: ${generatedDate}</div>
               </td>
               <td class="header-logo-cell">${headerLogoHtml}</td>
             </tr>
@@ -532,7 +565,11 @@ export const generatePlayerReportCard = async ({
             }
           </div>
 
-          <div class="footer">${footerLogoHtml}</div>
+          <!-- FOOTER -->
+          <div class="footer">
+            <div class="footer-tag">${player.name || 'Player'} #${player.squad_number || ''} • ${teamName} • ${currentSeason}</div>
+            <div>${footerLogoHtml}</div>
+          </div>
         </body>
       </html>
     `;

@@ -25,6 +25,7 @@ import { supabase } from '../supabase';
 // Constants & Utilities
 import { ageGroupOptions, profilePositions, profileSecondaryPositions } from '../constants/profileData';
 import { formationCategories, formationCategories9v9, formationLayouts, gameStateTactics } from '../constants/tactics';
+import { formatUkDate, getCurrentFootballSeason, getNextAgeGroup, promoteTeamName } from '../utils/dateHelpers';
 import { seedFullTeamRoster, seedSeasonStats, testOfflineQueueFlow } from '../utils/devSeeder';
 import { enqueueOfflineEvent, flushOfflineQueue, getOfflineQueue } from '../utils/offlineQueue';
 import { generatePlayerReportCard, generateSeasonPdfReport } from '../utils/pdfGenerator';
@@ -115,7 +116,7 @@ export default function App() {
   const [familyCodeInput, setFamilyCodeInput] = useState('');
 
   // App Layout State
-  const [appMode, setAppMode] = useState('coach'); // 'coach' | 'parent' | 'player'
+  const [appMode, setAppMode] = useState('coach'); 
   const [currentTab, setCurrentTab] = useState('coachHub'); 
   const [playerTab, setPlayerTab] = useState('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -247,12 +248,11 @@ export default function App() {
   const isAdultTeam = String(effectiveAgeGroup).toLowerCase().includes('adult');
   const is9v9Team = String(effectiveAgeGroup).toUpperCase() === 'U13';
 
-  // 🛡️ SUPERUSER ROLE LOCKDOWN (Darrell.Clarke@me.com)
+  // 🛡️ SUPERUSER ROLE LOCKDOWN
   const isSuperUser = 
     profile?.role === 'superuser' || 
     session?.user?.email?.toLowerCase() === 'darrell.clarke@me.com';
 
-  // STRICT ROLE ENFORCEMENT
   useEffect(() => {
     if (!profile || !profile.role_configured) return;
     const role = profile.role;
@@ -482,6 +482,7 @@ export default function App() {
       console.error("Critical Error fetching cloud data:", err);
     }
   };
+
   async function broadcastEvent(icon, text, explicitMinute = null) {
     if (!activeTeamId) return;
     const min = explicitMinute || `${Math.floor(displaySeconds / 60)}'`;
@@ -539,7 +540,6 @@ export default function App() {
     }
   }
 
-  // 🔑 ISOLATED TEAM FETCHING FOR MULTI-TEAM STAFF
   async function fetchUserProfile(userId) {
     setLoading(true);
     const startTime = Date.now();
@@ -559,7 +559,6 @@ export default function App() {
         }
       }
 
-      // Fetch staff links for this user
       const { data: staffLinks } = await supabase
         .from('team_staff')
         .select('team_id')
@@ -992,9 +991,14 @@ export default function App() {
     setIsSavingSeason(true);
 
     try {
-      const currentYear = new Date().getFullYear();
-      const seasonLabel = `Season ${currentYear - 1}/${currentYear}`;
+      // 1. Dynamic season label and UK timestamp
+      const seasonLabel = getCurrentFootballSeason();
+      const generatedDate = formatUkDate();
 
+      // 2. Freeze the concluding season data BEFORE calculating promotions
+      const concludingAgeGroup = effectiveAgeGroup;
+      const concludingTeamName = activeTeamObj?.name || teamName || 'Squad';
+      
       const totalMatches = matchHistory.length;
       const wins = matchHistory.filter(m => m.result === 'W').length;
       const draws = matchHistory.filter(m => m.result === 'D').length;
@@ -1002,10 +1006,10 @@ export default function App() {
       const goalsFor = matchHistory.reduce((sum, m) => sum + (m.team_score || 0), 0);
       const goalsAgainst = matchHistory.reduce((sum, m) => sum + (m.opponent_score || 0), 0);
       const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
+      const goalDiff = goalsFor - goalsAgainst;
 
-      const isAdult = String(effectiveAgeGroup).toLowerCase().includes('adult');
-      const parentAwardTitle = isAdult ? "FPOTS (Fans' Player of the Season)" : "PPOTS (Parents' Player of the Season)";
-      const coachAwardTitle = "CPOTS (Coach's Player of the Season)";
+      const isAdult = String(concludingAgeGroup).toLowerCase().includes('adult');
+      const parentAwardTitle = isAdult ? "FPOTS" : "PPOTS";
 
       const sortedByGoals = [...teamSheet].sort((a, b) => (b.goals || 0) - (a.goals || 0));
       const sortedByAssists = [...teamSheet].sort((a, b) => (b.assists || 0) - (a.assists || 0));
@@ -1017,20 +1021,44 @@ export default function App() {
       const topCoachPotm = sortedByCoachPotm[0]?.motm > 0 ? `${sortedByCoachPotm[0].name} (${sortedByCoachPotm[0].motm} Awards)` : 'N/A';
       const topParentPotm = sortedByParentPotm[0]?.parent_motm > 0 ? `${sortedByParentPotm[0].name} (${sortedByParentPotm[0].parent_motm} Awards)` : 'N/A';
 
-      let reportText = `🏆 EXECUTIVE SEASON REPORT (${seasonLabel})\nTeam: ${activeTeamObj?.name || 'Squad'} (${effectiveAgeGroup})\nGenerated: ${new Date().toLocaleDateString()}\n\n`;
-      reportText += `📊 TEAM RECORD:\n• Matches Played: ${totalMatches}\n• Record: ${wins}W - ${draws}D - ${losses}L (${winRate}% Win Rate)\n• Goals: ${goalsFor} Scored / ${goalsAgainst} Conceded (GD: ${goalsFor - goalsAgainst})\n\n`;
-      reportText += `⭐ INDIVIDUAL SEASON HONOURS:\n• Golden Boot: ${topScorer}\n• Playmaker Award: ${topAssister}\n• ${coachAwardTitle}: ${topCoachPotm}\n• ${parentAwardTitle}: ${topParentPotm}\n\n`;
-      reportText += `👥 SQUAD MASTER STATS BREAKDOWN:\n`;
+      // 3. Construct the RICH JSON SNAPSHOT of the concluded season
+      const vaultSnapshot = {
+        is_structured_json: true,
+        season_label: seasonLabel,
+        generated_date: generatedDate,
+        team_name: concludingTeamName,
+        age_group: concludingAgeGroup,
+        club_logo_url: activeTeamObj?.logo_url || teamLogoUrl || null,
+        scout_notes: scoutNotesInput || '',
+        record: { total_matches: totalMatches, wins, draws, losses, win_rate: winRate, goals_for: goalsFor, goals_against: goalsAgainst, goal_diff: goalDiff },
+        honours: { top_scorer: topScorer, top_assister: topAssister, top_coach_potm: topCoachPotm, top_parent_potm: topParentPotm, parent_award_title: parentAwardTitle },
+        squad_sheet: teamSheet.map(p => ({
+           id: p.id,
+           squad_number: p.squad_number || '-',
+           name: p.name,
+           position: p.position || 'N/A',
+           apps: p.apps || 0,
+           total_minutes_played: p.total_minutes_played || 0,
+           goals: p.goals || 0,
+           assists: p.assists || 0,
+           motm: p.motm || 0,
+           parent_motm: p.parent_motm || 0,
+        })),
+        match_history_archive: matchHistory.map(m => ({
+          created_at: m.created_at,
+          opponent: m.opponent_name || m.opponent || 'Opponent',
+          team_score: m.team_score ?? 0,
+          opponent_score: m.opponent_score ?? 0,
+          result: m.result || 'D',
+          match_type: m.match_type || 'Match'
+        }))
+      };
 
-      teamSheet.forEach(p => {
-        const avgMins = p.apps > 0 ? Math.round((p.total_minutes_played || 0) / p.apps) : 0;
-        reportText += `• #${p.squad_number || ''} ${p.name} (${p.position}): ${p.apps || 0} Apps | ${p.total_minutes_played || 0} Mins (${avgMins}m/g) | ${p.goals || 0}G | ${p.assists || 0}A | ${p.saves || 0} Saves | ${p.clean_sheets || 0} CS | ${p.motm || 0} CPOTM | ${p.parent_motm || 0} FPOTM | ${p.training_attended || 0} Trn\n`;
-      });
-
+      // Save JSON explicitly stringified so it can be parsed when viewed
       const { error: archiveErr } = await supabase.from('season_reports').insert([{
         team_id: activeTeamId,
         season_label: seasonLabel,
-        report_text: reportText,
+        report_text: JSON.stringify(vaultSnapshot),
         created_at: new Date().toISOString()
       }]);
 
@@ -1038,6 +1066,25 @@ export default function App() {
         console.error("❌ Season Vault Save Error:", archiveErr);
       }
 
+      // 4. Generate the concluding PDF Report using the frozen snapshot data
+      try {
+        await generateSeasonPdfReport({
+          teamName: concludingTeamName,
+          ageGroup: concludingAgeGroup,
+          clubLogoUrl: activeTeamObj?.logo_url || teamLogoUrl || null,
+          teamSheet: teamSheet,
+          matchHistory: matchHistory,
+          scoutNotes: scoutNotesInput,
+        });
+      } catch (shareErr) {
+        console.log("PDF Generation Warning:", shareErr);
+      }
+
+      // 5. Calculate Promoted Data for the upcoming season
+      const nextAgeGroup = getNextAgeGroup(concludingAgeGroup);
+      const promotedTeamName = promoteTeamName(concludingTeamName, concludingAgeGroup, nextAgeGroup);
+
+      // 6. Reset Player Stats
       const resetPlayerPromises = teamSheet.map(p => 
         supabase.from('players').update({
           apps: 0,
@@ -1055,6 +1102,16 @@ export default function App() {
         }).eq('id', p.id)
       );
 
+      // 7. Promote Team in Supabase & Clear Live Data
+      const { error: teamUpdateErr } = await supabase
+        .from('teams')
+        .update({ age_group: nextAgeGroup, name: promotedTeamName })
+        .eq('id', activeTeamId);
+
+      if (teamUpdateErr) {
+        console.error("❌ Team Age Promotion Error:", teamUpdateErr);
+      }
+
       await Promise.all([
         ...resetPlayerPromises,
         supabase.from('match_history').delete().eq('team_id', activeTeamId),
@@ -1062,37 +1119,33 @@ export default function App() {
         supabase.from('parent_motm_votes').delete().eq('team_id', activeTeamId)
       ]);
 
+      // 8. Update Local State to new Promoted Season
+      setTeamAgeGroup(nextAgeGroup);
+      setTeamName(promotedTeamName);
+      setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, age_group: nextAgeGroup, name: promotedTeamName } : t));
+
       setIsSeasonResetModalOpen(false);
       setSeasonResetConfirmText('');
       setIsSavingSeason(false);
 
+      if (session?.user?.id) {
+        await fetchUserProfile(session.user.id);
+      }
       fetchTeamData(session?.user?.id, activeTeamId);
       fetchMatchHistory(activeTeamId);
       fetchSeasonReports(activeTeamId);
 
-      Alert.alert("New Season Activated!", "Season summary archived into In-App Vault and all squad stats reset to zero.");
-
-      try {
-        await generateSeasonPdfReport({
-          teamName: activeTeamObj?.name || 'Tactical Engine Squad',
-          ageGroup: effectiveAgeGroup || 'Youth',
-          clubLogoUrl: activeTeamObj?.logo_url || teamLogoUrl || null,
-          teamSheet,
-          matchHistory,
-          scoutNotes: scoutNotesInput,
-        });
-      } catch (shareErr) {
-        console.log(shareErr);
-      }
+      Alert.alert(
+        "New Season Activated! 🎆",
+        `Season summary archived to vault. Squad stats reset to 0, and team successfully promoted to ${nextAgeGroup}!`
+      );
 
     } catch (err) {
       console.error("❌ Season Reset Error:", err);
       setIsSavingSeason(false);
       Alert.alert("Reset Error", err.message);
     }
-  };
-
-  const startArchiveGoalEdit = (matchRecord, eventIdx) => {
+  };const startArchiveGoalEdit = (matchRecord, eventIdx) => {
     setEditingArchiveMatch(matchRecord);
     setEditingArchiveEventIdx(eventIdx);
     setSelectedArchiveScorer(null);
@@ -1286,7 +1339,6 @@ export default function App() {
     setIsTafeModalOpen(true);
   };
 
-  // ⚡ TAFE ALGORITHM (FULL 29-FORMATION 9v9 & 11v11 SUPPORT)
   const runTafeAlgorithm = (backlineCode) => {
     setTafeBackline(backlineCode);
     
@@ -1547,7 +1599,6 @@ export default function App() {
     setLoading(true);
 
     try {
-      // 1. Head Coach (HEAD-XXXX)
       const { data: headTeam } = await supabase.from('teams').select('*').eq('invite_code', cleanCode).maybeSingle();
       if (headTeam) {
         await supabase.from('team_staff').upsert([{ team_id: headTeam.id, user_id: session.user.id, role: 'coach' }], { onConflict: 'team_id,user_id' });
@@ -1558,7 +1609,6 @@ export default function App() {
         return;
       }
 
-      // 2. Assistant Coach (STAF-XXXX)
       const { data: staffTeam } = await supabase.from('teams').select('*').eq('staff_code', cleanCode).maybeSingle();
       if (staffTeam) {
         await supabase.from('team_staff').upsert([{ team_id: staffTeam.id, user_id: session.user.id, role: 'assistant' }], { onConflict: 'team_id,user_id' });
@@ -1569,7 +1619,6 @@ export default function App() {
         return;
       }
 
-      // 3. Administrator Code (ADMN-XXXX)
       const { data: adminTeam } = await supabase.from('teams').select('*').eq('admin_code', cleanCode).maybeSingle();
       if (adminTeam) {
         await supabase.from('team_staff').upsert([{ team_id: adminTeam.id, user_id: session.user.id, role: 'admin' }], { onConflict: 'team_id,user_id' });
@@ -1580,7 +1629,6 @@ export default function App() {
         return;
       }
 
-      // 4. Player Family Code (FAM-XXXX)
       const { data: player } = await supabase.from('players').select('*').eq('family_code', cleanCode).maybeSingle();
       if (player) {
         await supabase.from('parent_players').insert([{ player_id: player.id, parent_id: session.user.id, is_primary: true }]);
@@ -1592,7 +1640,6 @@ export default function App() {
         return;
       }
 
-      // 5. Team Fan / General Supporter Code (FAN-XXXX)
       const { data: fanTeam } = await supabase.from('teams').select('*').eq('fan_code', cleanCode).maybeSingle();
       if (fanTeam) {
         await supabase.from('profiles').update({ role: 'fan', role_configured: true }).eq('id', session.user.id);
@@ -2013,6 +2060,35 @@ export default function App() {
       </View>
     );
   };
+
+  // Helper to safely parse viewing season report
+  const parsedVaultSnapshot = viewingSeasonReport ? (() => {
+    try {
+      const parsed = JSON.parse(viewingSeasonReport.report_text);
+      if (parsed && (parsed.is_structured_json || parsed.record)) return parsed;
+    } catch (e) {}
+    return null;
+  })() : null;
+
+  const exportVaultPdf = async (snapshot) => {
+    if (!snapshot) return;
+    try {
+      await generateSeasonPdfReport({
+        teamName: snapshot.team_name,
+        ageGroup: snapshot.age_group,
+        clubLogoUrl: snapshot.club_logo_url,
+        teamSheet: snapshot.squad_sheet,
+        matchHistory: snapshot.match_history_archive?.map(m => ({
+          ...m,
+          opponent_name: m.opponent
+        })) || [],
+        scoutNotes: snapshot.scout_notes,
+      });
+    } catch (err) {
+      Alert.alert("PDF Export Error", err?.message || 'Could not export archived PDF.');
+    }
+  };
+
   const SUPABASE_LOGO_URL = 'https://jnogngcywfgitzryooig.supabase.co/storage/v1/object/public/app-assets/Tactical%20Engine%20Logo.png';
 
   if (loading) {
@@ -2213,7 +2289,6 @@ export default function App() {
           <Text style={styles.menuTriggerIcon}>☰</Text>
         </TouchableOpacity>
 
-        {/* MODE TOGGLE: EXCLUSIVELY VISIBLE TO SUPERUSER (Darrell.Clarke@me.com) */}
         {isSuperUser ? (
           <View style={styles.toggleCenterGroup}>
             <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'coach' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('coach')}>
@@ -2257,7 +2332,6 @@ export default function App() {
                   const ageGrp = t.age_group || 'U16';
                   setTeamAgeGroup(ageGrp);
 
-                  // ⚡ Instant local formation switch on tap
                   const is9v9 = ['U13'].includes(String(ageGrp).toUpperCase());
                   setActiveFormation(t.default_formation || (is9v9 ? '3-3-2' : '4-2-3-1'));
                 }}
@@ -2339,7 +2413,6 @@ export default function App() {
             <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
               {(teamSheet || []).map(p => p && (
                 <TouchableOpacity key={p.id} style={styles.card} onPress={() => setEditingPlayer(p)}>
-                  {/* HEADER ROW: Name on Left, Edit Profile Button on Right */}
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <Text style={[styles.roleTitle, { flex: 1, marginRight: 10 }]} numberOfLines={1}>
                       #{p.squad_number || '0'} {p.name}
@@ -2349,7 +2422,6 @@ export default function App() {
                     </View>
                   </View>
 
-                  {/* COMPACT PLAYER SUMMARY BOX */}
                   <View style={{ backgroundColor: '#0B0E14', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44' }}>
                     <Text style={[styles.roleSubTitle, { marginBottom: 4 }]}>
                       Primary: <Text style={{ color: '#39FF14' }}>{p.position || 'TBD'}</Text> | Secondary: <Text style={{ color: '#3b82f6' }}>{p.secondary_position || 'None'}</Text>
@@ -2525,40 +2597,211 @@ export default function App() {
         )}
       </View>
 
-      {/* MODALS & OVERLAYS */}
+      {/* ======================================================== */}
+      {/* 📁 REDESIGNED EXECUTIVE SEASON VAULT MODAL */}
+      {/* ======================================================== */}
       <Modal visible={isSeasonArchiveOpen} transparent={true} animationType="slide">
         <View style={styles.modalOverlayFull}>
           <SafeAreaView style={{ flex: 1, width: '100%' }}>
+            
+            {/* Top Modal Navigation Header */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#2E3A44', backgroundColor: '#0B0E14' }}>
-              <Text style={{ color: '#3b82f6', fontSize: 18, fontWeight: 'bold' }}>📁 Season Vault</Text>
-              <TouchableOpacity onPress={() => setIsSeasonArchiveOpen(false)} style={{ backgroundColor: '#1A1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 }}>
+              <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>📁 Season Vault Archive</Text>
+              <TouchableOpacity onPress={() => { setViewingSeasonReport(null); setIsSeasonArchiveOpen(false); }} style={{ backgroundColor: '#1A1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 }}>
                 <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>Close</Text>
               </TouchableOpacity>
             </View>
 
             {viewingSeasonReport ? (
-              <ScrollView style={{ flex: 1, backgroundColor: '#0B0E14', padding: 15 }}>
-                <TouchableOpacity onPress={() => setViewingSeasonReport(null)} style={{ marginBottom: 15 }}>
-                  <Text style={{ color: '#94a3b8', fontSize: 14 }}>← Back to Archives</Text>
-                </TouchableOpacity>
-                <View style={[styles.card, { borderColor: '#3b82f6' }]}>
-                  <Text style={{ color: '#ffffff', fontSize: 14, lineHeight: 22 }}>
-                    {viewingSeasonReport.report_text}
-                  </Text>
+              <ScrollView style={{ flex: 1, backgroundColor: '#0B0E14', padding: 15 }} showsVerticalScrollIndicator={true}>
+                
+                {/* Secondary Action Bar (Back & Export PDF) */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                  <TouchableOpacity onPress={() => setViewingSeasonReport(null)} style={{ paddingVertical: 4 }}>
+                    <Text style={{ color: '#94a3b8', fontSize: 14, fontWeight: 'bold' }}>← Back to Reports</Text>
+                  </TouchableOpacity>
+
+                  {parsedVaultSnapshot && (
+                    <TouchableOpacity 
+                      style={{ backgroundColor: '#39FF14', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                      onPress={() => exportVaultPdf(parsedVaultSnapshot)}
+                    >
+                      <Text style={{ color: '#0B0E14', fontWeight: 'bold', fontSize: 13 }}>📄 Export PDF</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
+
+                {/* 🌟 RICH EXECUTIVE REPORT VIEW */}
+                {parsedVaultSnapshot ? (
+                  <>
+                    {/* Header Card */}
+                    <View style={[styles.card, { borderColor: '#15803D', borderWidth: 2, marginBottom: 12 }]}>
+                      <Text style={{ color: '#ffffff', fontSize: 22, fontWeight: '900', textTransform: 'uppercase' }}>
+                        {parsedVaultSnapshot.team_name}
+                      </Text>
+                      <Text style={{ color: '#39FF14', fontSize: 12, fontWeight: 'bold', marginTop: 4, textTransform: 'uppercase' }}>
+                        {parsedVaultSnapshot.age_group} AGE GROUP • {parsedVaultSnapshot.season_label?.toUpperCase()}
+                      </Text>
+                      <Text style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
+                        Archived: {parsedVaultSnapshot.generated_date || new Date(viewingSeasonReport.created_at).toLocaleDateString()}
+                      </Text>
+                    </View>
+
+                    {/* Team Record & Performance Summary */}
+                    <View style={[styles.card, { marginBottom: 12 }]}>
+                      <Text style={styles.sectionHeaderModal}>📊 Team Record & Performance Summary</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+                        <View style={{ alignItems: 'center', flex: 1 }}>
+                          <Text style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold' }}>MATCHES</Text>
+                          <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: 'bold', marginTop: 3 }}>
+                            {parsedVaultSnapshot.record?.total_matches || 0} Games
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'center', flex: 1 }}>
+                          <Text style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold' }}>RECORD</Text>
+                          <Text style={{ color: '#39FF14', fontSize: 15, fontWeight: 'bold', marginTop: 3 }}>
+                            {parsedVaultSnapshot.record?.wins}W - {parsedVaultSnapshot.record?.draws}D - {parsedVaultSnapshot.record?.losses}L
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'center', flex: 1 }}>
+                          <Text style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold' }}>WIN RATE</Text>
+                          <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: 'bold', marginTop: 3 }}>
+                            {parsedVaultSnapshot.record?.win_rate || 0}%
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#2E3A44', alignItems: 'center' }}>
+                        <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold' }}>
+                          Goals: {parsedVaultSnapshot.record?.goals_for} Scored / {parsedVaultSnapshot.record?.goals_against} Conceded ({parsedVaultSnapshot.record?.goal_diff > 0 ? '+' : ''}{parsedVaultSnapshot.record?.goal_diff} GD)
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Individual Season Honours */}
+                    <View style={[styles.card, { marginBottom: 12 }]}>
+                      <Text style={styles.sectionHeaderModal}>⭐ Individual Season Honours</Text>
+                      <View style={{ marginTop: 8, gap: 8 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={{ color: '#eab308', fontSize: 16, width: 26 }}>🏆</Text>
+                          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>Golden Boot:</Text>
+                          <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_scorer}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={{ color: '#3b82f6', fontSize: 16, width: 26 }}>🅰️</Text>
+                          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>Playmaker:</Text>
+                          <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_assister}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={{ color: '#39FF14', fontSize: 16, width: 26 }}>⭐</Text>
+                          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>CPOTS (Coach):</Text>
+                          <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_coach_potm}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={{ color: '#a855f7', fontSize: 16, width: 26 }}>🌟</Text>
+                          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>{parsedVaultSnapshot.honours?.parent_award_title || 'PPOTS'}:</Text>
+                          <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_parent_potm}</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Head Coach Review Notes */}
+                    {parsedVaultSnapshot.scout_notes ? (
+                      <View style={[styles.card, { marginBottom: 12 }]}>
+                        <Text style={styles.sectionHeaderModal}>Head Coach Season Review</Text>
+                        <Text style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 18, marginTop: 6 }}>
+                          {parsedVaultSnapshot.scout_notes}
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {/* Squad Master Stats Breakdown */}
+                    <View style={[styles.card, { marginBottom: 12 }]}>
+                      <Text style={styles.sectionHeaderModal}>👥 Squad Master Stats Breakdown</Text>
+                      <View style={{ marginTop: 8 }}>
+                        {(parsedVaultSnapshot.squad_sheet || []).map((p, idx) => {
+                          const avgM = p.apps > 0 ? Math.round((p.total_minutes_played || 0) / p.apps) : 0;
+                          const potm = (p.motm || 0) + (p.parent_motm || 0);
+                          return (
+                            <View key={p.id || idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13 }}>
+                                  <Text style={{ color: '#39FF14' }}>#{p.squad_number || '-'} </Text>{p.name} <Text style={{ color: '#64748b', fontSize: 11 }}>({p.position})</Text>
+                                </Text>
+                                <Text style={{ color: '#94a3b8', fontSize: 10, marginTop: 2 }}>
+                                  {p.apps} apps • {p.total_minutes_played || 0}m ({avgM}m/g)
+                                </Text>
+                              </View>
+                              <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+                                <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 12 }}>{p.goals || 0}G</Text>
+                                <Text style={{ color: '#3b82f6', fontWeight: 'bold', fontSize: 12 }}>{p.assists || 0}A</Text>
+                                <Text style={{ color: '#eab308', fontWeight: 'bold', fontSize: 12 }}>{potm}⭐</Text>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+
+                    {/* Season Match Archive */}
+                    <View style={[styles.card, { marginBottom: 35 }]}>
+                      <Text style={styles.sectionHeaderModal}>Season Match Archive & Results</Text>
+                      <View style={{ marginTop: 8 }}>
+                        {(parsedVaultSnapshot.match_history_archive || []).length === 0 ? (
+                          <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'center', paddingVertical: 10 }}>No match history recorded.</Text>
+                        ) : (
+                          (parsedVaultSnapshot.match_history_archive || []).map((m, idx) => (
+                            <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
+                              <View>
+                                <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13 }}>vs {m.opponent}</Text>
+                                <Text style={{ color: '#64748b', fontSize: 10 }}>
+                                  {m.created_at ? formatUkDate(new Date(m.created_at)) : 'Match'} • {m.match_type}
+                                </Text>
+                              </View>
+                              <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 14 }}>
+                                  {m.team_score} - {m.opponent_score}
+                                </Text>
+                                <Text style={{ color: m.result === 'W' ? '#39FF14' : m.result === 'L' ? '#ef4444' : '#eab308', fontSize: 11, fontWeight: 'bold' }}>
+                                  {m.result}
+                                </Text>
+                              </View>
+                            </View>
+                          ))
+                        )}
+                      </View>
+                    </View>
+                  </>
+                ) : (
+                  // Fallback for older test reports saved prior to structured JSON
+                  <View style={[styles.card, { borderColor: '#3b82f6' }]}>
+                    <Text style={{ color: '#ffffff', fontSize: 13, lineHeight: 20 }}>
+                      {viewingSeasonReport.report_text}
+                    </Text>
+                  </View>
+                )}
               </ScrollView>
             ) : (
+              // Archive List View
               <ScrollView style={{ flex: 1, backgroundColor: '#0B0E14', padding: 15 }}>
                 {seasonReports.length === 0 ? (
-                  <Text style={{ color: '#94a3b8', textAlign: 'center', marginTop: 40 }}>No archived seasons found for this team.</Text>
+                  <Text style={{ color: '#94a3b8', textAlign: 'center', marginTop: 40 }}>
+                    No archived seasons found for this team.
+                  </Text>
                 ) : (
                   seasonReports.map(report => (
                     <TouchableOpacity 
                       key={report.id} 
-                      style={[styles.card, { borderColor: '#3b82f6' }]}
+                      style={[styles.card, { borderColor: '#39FF14', paddingVertical: 16 }]}
                       onPress={() => setViewingSeasonReport(report)}
                     >
-                      <Text style={{ color: '#3b82f6', fontWeight: 'bold', fontSize: 16 }}>{report.season_label}</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 17 }}>
+                          {report.season_label}
+                        </Text>
+                        <Text style={{ color: '#3b82f6', fontWeight: 'bold', fontSize: 12 }}>
+                          View Report ➔
+                        </Text>
+                      </View>
                       <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>
                         Archived: {new Date(report.created_at).toLocaleDateString()}
                       </Text>
@@ -2663,7 +2906,6 @@ export default function App() {
         shareCoParentInvite={shareCoParentInvite}
       />
 
-      {/* COACH NOTES STAGING MODAL */}
       <CoachNotesStagingModal
         visible={isNotesStagingModalOpen}
         onClose={() => setIsNotesStagingModalOpen(false)}
@@ -2672,7 +2914,6 @@ export default function App() {
         onNotesPushed={() => fetchTeamData(session?.user?.id, activeTeamId)}
       />
 
-      {/* EXTRACTED: EDIT PLAYER PROFILE MODAL */}
       <EditPlayerProfileModal
         editingPlayer={editingPlayer}
         setEditingPlayer={setEditingPlayer}
@@ -2683,7 +2924,6 @@ export default function App() {
         appMode={appMode}
       />
 
-      {/* EXTRACTED: LIVE MATCH EVENT MODALS */}
       <LiveEventModals
         liveEventMode={liveEventMode}
         setLiveEventMode={setLiveEventMode}
@@ -2701,7 +2941,6 @@ export default function App() {
         selectParentMotm={selectParentMotm}
       />
 
-      {/* EXTRACTED: BRANDED PDF EXPORT MODAL */}
       <PdfExportModal
         isPdfExportModalOpen={isPdfExportModalOpen}
         setIsPdfExportModalOpen={setIsPdfExportModalOpen}
@@ -2717,7 +2956,6 @@ export default function App() {
         generatePlayerReportCard={generatePlayerReportCard}
       />
 
-      {/* FA LEAGUE TABLE WEBVIEW MODAL */}
       <Modal visible={isFaWebviewOpen} animationType="slide">
         <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0E14' }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
@@ -2748,7 +2986,6 @@ export default function App() {
         </SafeAreaView>
       </Modal>
 
-      {/* YOUTUBE PLAYER MODAL */}
       <Modal 
         visible={!!activeVideoId} 
         transparent={true} 
@@ -2775,7 +3012,6 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* DRILL SELECTOR MODAL */}
       <Modal visible={!!drillSelectorMode} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setDrillSelectorMode(null)} />
@@ -2806,7 +3042,6 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* LINEUP ASSIGNMENT MODAL */}
       <Modal visible={!!lineupAssignPlayer} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setLineupAssignPlayer(null)} />
@@ -2839,7 +3074,6 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* ACTIVE LIVE PLAYER QUICK ACTION MODAL */}
       <Modal visible={!!activeLivePlayer && liveEventMode === 'none'} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setActiveLivePlayer(null)} />
@@ -2865,7 +3099,6 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* DELETE TEAM CONFIRMATION MODAL */}
       <Modal visible={!!teamToDelete} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => { setTeamToDelete(null); setDeleteTeamConfirmText(''); }} />
@@ -2892,7 +3125,6 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* DELETE PLAYER CONFIRMATION MODAL */}
       <Modal visible={!!playerToDelete} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => { setPlayerToDelete(null); setDeleteConfirmText(''); }} />
@@ -2919,7 +3151,6 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* ADD PLAYER QUICK SETUP MODAL */}
       <Modal visible={isAddPlayerModalOpen} transparent={true} animationType="slide">
         <View style={styles.modalOverlayFull}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setIsAddPlayerModalOpen(false)} />
@@ -2978,7 +3209,6 @@ export default function App() {
             <ScrollView style={{ flex: 1, marginTop: 10 }} keyboardShouldPersistTaps="handled">
               {appMode === 'coach' && (
                 <>
-                  {/* DEV SEEDING strictly wrapped in isSuperUser */}
                   {__DEV__ && isSuperUser && (
                     <>
                       <TouchableOpacity 
@@ -3029,14 +3259,12 @@ export default function App() {
                     </>
                   )}
 
-                  {/* MANAGE TEAM STAFF BUTTON */}
                   {(profile?.role === 'coach' || profile?.role === 'assistant' || profile?.role === 'admin' || isSuperUser) && (
                     <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setIsStaffModalOpen(true); }}>
                       <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>👥 Manage Team Staff</Text>
                     </TouchableOpacity>
                   )}
 
-                  {/* STAGED PLAYER NOTES CENTER BUTTON */}
                   <TouchableOpacity 
                     style={[styles.sidebarItem, { borderColor: '#39FF14' }]} 
                     onPress={() => { setIsSidebarOpen(false); setIsNotesStagingModalOpen(true); }}
@@ -3142,7 +3370,6 @@ export default function App() {
                     <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>➕ Create New Team</Text>
                   </TouchableOpacity>
 
-                  {/* DELETE TEAM STRICTLY HEAD COACH / SUPERUSER */}
                   {(isSuperUser || profile?.role === 'coach') && (
                     <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#ef4444', marginTop: 5, marginBottom: 20 }]} onPress={() => { 
                       setIsSidebarOpen(false); 
