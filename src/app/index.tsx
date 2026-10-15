@@ -39,11 +39,24 @@ import {
   resolvePosForFormation
 } from '../utils/positionHelpers';
 
+// Audio-Tactile Feedback Engine
+import {
+  feedbackFulltimeWhistle,
+  feedbackKickoffWhistle,
+  feedbackOpponentCard,
+  feedbackOpponentGoal,
+  feedbackOurCard,
+  feedbackOurGoal,
+  feedbackSubstitution,
+  initAudioSession
+} from '../utils/feedback';
+
 // Modals
 import CoachNotesStagingModal from '../modals/CoachNotesStagingModal';
 import CreateTeamModal from '../modals/CreateTeamModal';
 import EditPlayerProfileModal from '../modals/EditPlayerProfileModal';
 import FormationModal from '../modals/FormationModal';
+import HalfTimeSubModal from '../modals/HalfTimeSubModal';
 import InviteModal from '../modals/InviteModal';
 import LiveEventModals from '../modals/LiveEventModals';
 import MatchArchiveModal from '../modals/MatchArchiveModal';
@@ -191,12 +204,13 @@ export default function App() {
   const [archiveEditStep, setArchiveEditStep] = useState('none');
   const [selectedArchiveScorer, setSelectedArchiveScorer] = useState(null);
   
-  // Substitution Reason Modal State
+  // Substitution Modals State
   const [subReasonModalState, setSubReasonModalState] = useState({
     visible: false,
     offPlayer: null,
     onPlayer: null
   });
+  const [isHalfTimeSubModalOpen, setIsHalfTimeSubModalOpen] = useState(false);
 
   // FA League Table WebView State
   const [faLeagueUrl, setFaLeagueUrl] = useState('');
@@ -658,6 +672,7 @@ export default function App() {
 
   useEffect(() => {
     let initialMount = true;
+    initAudioSession();
     fetchCloudData();
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -807,6 +822,8 @@ export default function App() {
           setDisplaySeconds(0);
           setMatchStartTimestamp(Date.now());
           
+          feedbackKickoffWhistle();
+          
           const newTracker = { ...playerMinutesTracker };
           teamSheet.forEach(p => {
             if (p.is_starter && p.available) newTracker[p.id] = { lastOn: 0, totalSeconds: 0 };
@@ -833,6 +850,8 @@ export default function App() {
           setAccumulatedSeconds(displaySeconds);
           setMatchStartTimestamp(null);
           
+          feedbackFulltimeWhistle();
+          
           const newTracker = { ...playerMinutesTracker };
           teamSheet.forEach(p => {
             if (p.is_starter && p.available && newTracker[p.id]) {
@@ -850,6 +869,8 @@ export default function App() {
         { text: "Start", onPress: async () => {
           setMatchPhase('2ND HALF');
           setMatchStartTimestamp(Date.now());
+          
+          feedbackKickoffWhistle();
           
           const newTracker = { ...playerMinutesTracker };
           teamSheet.forEach(p => {
@@ -870,6 +891,8 @@ export default function App() {
           setMatchPhase('FULL-TIME');
           setAccumulatedSeconds(displaySeconds);
           setMatchStartTimestamp(null);
+          
+          feedbackFulltimeWhistle();
           
           await broadcastEvent('🏁', 'Full-Time Whistle!');
           
@@ -968,6 +991,7 @@ export default function App() {
       Alert.alert("Reset Match", "Reset clock, score, and clear live ticker?", [
         { text: "Cancel", style: "cancel" },
         { text: "Reset", style: "destructive", onPress: async () => {
+            feedbackFulltimeWhistle();
             resetMatchState();
             setPlayerMinutesTracker({});
             await supabase.from('live_ticker').delete().eq('team_id', activeTeamId);
@@ -991,11 +1015,9 @@ export default function App() {
     setIsSavingSeason(true);
 
     try {
-      // 1. Dynamic season label and UK timestamp
       const seasonLabel = getCurrentFootballSeason();
       const generatedDate = formatUkDate();
 
-      // 2. Freeze the concluding season data BEFORE calculating promotions
       const concludingAgeGroup = effectiveAgeGroup;
       const concludingTeamName = activeTeamObj?.name || teamName || 'Squad';
       
@@ -1021,7 +1043,6 @@ export default function App() {
       const topCoachPotm = sortedByCoachPotm[0]?.motm > 0 ? `${sortedByCoachPotm[0].name} (${sortedByCoachPotm[0].motm} Awards)` : 'N/A';
       const topParentPotm = sortedByParentPotm[0]?.parent_motm > 0 ? `${sortedByParentPotm[0].name} (${sortedByParentPotm[0].parent_motm} Awards)` : 'N/A';
 
-      // 3. Construct the RICH JSON SNAPSHOT of the concluded season
       const vaultSnapshot = {
         is_structured_json: true,
         season_label: seasonLabel,
@@ -1054,7 +1075,6 @@ export default function App() {
         }))
       };
 
-      // Save JSON explicitly stringified so it can be parsed when viewed
       const { error: archiveErr } = await supabase.from('season_reports').insert([{
         team_id: activeTeamId,
         season_label: seasonLabel,
@@ -1066,7 +1086,6 @@ export default function App() {
         console.error("❌ Season Vault Save Error:", archiveErr);
       }
 
-      // 4. Generate the concluding PDF Report using the frozen snapshot data
       try {
         await generateSeasonPdfReport({
           teamName: concludingTeamName,
@@ -1080,11 +1099,9 @@ export default function App() {
         console.log("PDF Generation Warning:", shareErr);
       }
 
-      // 5. Calculate Promoted Data for the upcoming season
       const nextAgeGroup = getNextAgeGroup(concludingAgeGroup);
       const promotedTeamName = promoteTeamName(concludingTeamName, concludingAgeGroup, nextAgeGroup);
 
-      // 6. Reset Player Stats
       const resetPlayerPromises = teamSheet.map(p => 
         supabase.from('players').update({
           apps: 0,
@@ -1102,7 +1119,6 @@ export default function App() {
         }).eq('id', p.id)
       );
 
-      // 7. Promote Team in Supabase & Clear Live Data
       const { error: teamUpdateErr } = await supabase
         .from('teams')
         .update({ age_group: nextAgeGroup, name: promotedTeamName })
@@ -1119,7 +1135,6 @@ export default function App() {
         supabase.from('parent_motm_votes').delete().eq('team_id', activeTeamId)
       ]);
 
-      // 8. Update Local State to new Promoted Season
       setTeamAgeGroup(nextAgeGroup);
       setTeamName(promotedTeamName);
       setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, age_group: nextAgeGroup, name: promotedTeamName } : t));
@@ -1145,7 +1160,9 @@ export default function App() {
       setIsSavingSeason(false);
       Alert.alert("Reset Error", err.message);
     }
-  };const startArchiveGoalEdit = (matchRecord, eventIdx) => {
+  };
+
+  const startArchiveGoalEdit = (matchRecord, eventIdx) => {
     setEditingArchiveMatch(matchRecord);
     setEditingArchiveEventIdx(eventIdx);
     setSelectedArchiveScorer(null);
@@ -1230,6 +1247,14 @@ export default function App() {
 
   const finishGoalFlow = async (scorer, assist) => {
     setLiveEventMode('none');
+
+    // Dual-route Audio-Tactile: Cheer for our squad, groan for opponent
+    if (scorer === 'Opponent') {
+      feedbackOpponentGoal();
+    } else {
+      feedbackOurGoal();
+    }
+
     if (scorer !== 'Opponent' && scorer?.id) await adjustMatchStat(scorer, 'goals', 1);
     if (assist !== 'None' && assist !== 'Opponent' && assist?.id) await adjustMatchStat(assist, 'assists', 1);
 
@@ -1245,6 +1270,60 @@ export default function App() {
     await broadcastEvent('⚽', msg, pendingEvent?.minute);
   };
 
+  // 🔄 HALF-TIME BULK SUBSTITUTIONS PROCESSOR
+  const handleBatchHalfTimeSubs = async (swaps) => {
+    if (!swaps || swaps.length === 0) return;
+
+    // Trigger substitution audio once
+    feedbackSubstitution();
+
+    const newTracker = { ...playerMinutesTracker };
+    const dbUpdates = [];
+    const changeDescriptions = [];
+
+    setTeamSheet(prev => {
+      let updatedSheet = [...prev];
+
+      swaps.forEach(({ offPlayer, onPlayer }) => {
+        const targetPos = offPlayer.matchday_position || offPlayer.position || 'DEFAULT';
+
+        // 1. Accrue 1st half minutes for offPlayer
+        if (newTracker[offPlayer.id]) {
+          newTracker[offPlayer.id].totalSeconds += (displaySeconds - newTracker[offPlayer.id].lastOn);
+        }
+
+        // 2. Queue onPlayer to start fresh with displaySeconds at 2nd half kick-off
+        if (!newTracker[onPlayer.id]) {
+          newTracker[onPlayer.id] = { totalSeconds: 0 };
+        }
+        newTracker[onPlayer.id].lastOn = displaySeconds;
+
+        // 3. Update memory state
+        updatedSheet = updatedSheet.map(p => {
+          if (p.id === offPlayer.id) return { ...p, matchday_position: 'Bench', is_starter: false };
+          if (p.id === onPlayer.id) return { ...p, matchday_position: targetPos, is_starter: true };
+          return p;
+        });
+
+        // 4. Queue Supabase updates
+        dbUpdates.push(supabase.from('players').update({ matchday_position: 'Bench', is_starter: false }).eq('id', offPlayer.id));
+        dbUpdates.push(supabase.from('players').update({ matchday_position: targetPos, is_starter: true }).eq('id', onPlayer.id));
+
+        changeDescriptions.push(`${onPlayer.name} ON for ${offPlayer.name}`);
+      });
+
+      return updatedSheet;
+    });
+
+    setPlayerMinutesTracker(newTracker);
+    await Promise.all(dbUpdates);
+
+    // Single consolidated ticker broadcast
+    const min = `${Math.floor(displaySeconds / 60)}' (HT)`;
+    await broadcastEvent('🔄', `HALF-TIME SUBS: ${changeDescriptions.join(', ')}`, min);
+
+    Alert.alert("Half-Time Subs Applied", `${swaps.length} changes confirmed. Pitch updated for 2nd half kick-off.`);
+  };
   const initCardFlow = () => {
     const min = `${Math.floor(displaySeconds / 60)}'`;
     setPendingEvent({ minute: min, type: 'card' });
@@ -1258,6 +1337,14 @@ export default function App() {
 
   const finishCardFlow = async (playerOrOpponent) => {
     setLiveEventMode('none');
+
+    // Dual-route Card Audio-Tactile feedback
+    if (playerOrOpponent === 'Opponent') {
+      feedbackOpponentCard();
+    } else {
+      feedbackOurCard();
+    }
+
     const isYellow = pendingEvent?.cardType === 'yellow';
     const icon = isYellow ? '🟨' : '🟥';
     
@@ -1289,6 +1376,9 @@ export default function App() {
     const { offPlayer, onPlayer } = subReasonModalState;
     setSubReasonModalState({ visible: false, offPlayer: null, onPlayer: null });
     if (!offPlayer || !onPlayer) return;
+
+    // Trigger substitution voice line & firm vibration bump
+    feedbackSubstitution();
 
     const onTargetPos = offPlayer.matchday_position || offPlayer.position || 'DEFAULT';
 
@@ -2061,7 +2151,6 @@ export default function App() {
     );
   };
 
-  // Helper to safely parse viewing season report
   const parsedVaultSnapshot = viewingSeasonReport ? (() => {
     try {
       const parsed = JSON.parse(viewingSeasonReport.report_text);
@@ -2107,7 +2196,6 @@ export default function App() {
     );
   }
 
-  // 🔒 LOGIN / SIGN-UP SCREEN
   if (!session) {
     return (
       <SafeAreaView style={styles.authContainer}>
@@ -2182,7 +2270,6 @@ export default function App() {
     );
   }
 
-  // 🔒 ROLE SELECTION GATE FOR NEW ACCOUNTS
   if (session && profile && !profile.role_configured) {
     return (
       <SafeAreaView style={styles.authContainer}>
@@ -2348,7 +2435,6 @@ export default function App() {
       {/* SCREEN ROUTER VIEWER */}
       <View style={styles.screenViewer}>
 
-        {/* PLAYER & PARENT / FAN PROFILE VIEW */}
         {(currentTab === 'player' || currentTab === 'profiles') && appMode !== 'coach' && (
           <PlayerProfileScreen
             myLinkedPlayers={myLinkedPlayers}
@@ -2397,7 +2483,6 @@ export default function App() {
           />
         )}
 
-        {/* COACH PROFILES LIST */}
         {currentTab === 'profiles' && appMode === 'coach' && (
           <View style={{ flex: 1 }}>
             <View style={styles.headerRow}>
@@ -2442,7 +2527,6 @@ export default function App() {
           </View>
         )}
 
-        {/* COACH HUB */}
         {currentTab === 'coachHub' && (
           <CoachHubScreen
             matchHistory={matchHistory}
@@ -2462,7 +2546,6 @@ export default function App() {
           />
         )}
 
-        {/* LIVE MATCH (COACH MODE) */}
         {currentTab === 'liveMatch' && (
           <LiveMatchScreen
             appMode={appMode}
@@ -2473,10 +2556,10 @@ export default function App() {
             initCardFlow={initCardFlow}
             onPitchPlayers={onPitchPlayers}
             subs={subs}
+            openHalfTimeSubModal={() => setIsHalfTimeSubModalOpen(true)}
           />
         )}
 
-        {/* LINEUP SCREEN (ALL MODES) */}
         {currentTab === 'lineup' && (
           <LineupScreen
             activeFormation={activeFormation}
@@ -2501,7 +2584,6 @@ export default function App() {
           />
         )}
 
-        {/* STATS / TEAM SHEET (ALL MODES) */}
         {currentTab === 'teamSheet' && (
           <TeamSheetScreen
             profile={profile}
@@ -2512,7 +2594,6 @@ export default function App() {
           />
         )}
 
-        {/* TRAINING CENTER */}
         {currentTab === 'training' && (
           <TrainingScreen
             activeTeamId={activeTeamId}
@@ -2529,7 +2610,6 @@ export default function App() {
           />
         )}
 
-        {/* CUSTOM TRAINING PLANNER */}
         {currentTab === 'customTraining' && (
           <CustomTrainingScreen
             activeTeamId={activeTeamId}
@@ -2597,14 +2677,11 @@ export default function App() {
         )}
       </View>
 
-      {/* ======================================================== */}
-      {/* 📁 REDESIGNED EXECUTIVE SEASON VAULT MODAL */}
-      {/* ======================================================== */}
+      {/* 📁 EXECUTIVE SEASON VAULT MODAL */}
       <Modal visible={isSeasonArchiveOpen} transparent={true} animationType="slide">
         <View style={styles.modalOverlayFull}>
           <SafeAreaView style={{ flex: 1, width: '100%' }}>
             
-            {/* Top Modal Navigation Header */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#2E3A44', backgroundColor: '#0B0E14' }}>
               <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>📁 Season Vault Archive</Text>
               <TouchableOpacity onPress={() => { setViewingSeasonReport(null); setIsSeasonArchiveOpen(false); }} style={{ backgroundColor: '#1A1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 }}>
@@ -2615,7 +2692,6 @@ export default function App() {
             {viewingSeasonReport ? (
               <ScrollView style={{ flex: 1, backgroundColor: '#0B0E14', padding: 15 }} showsVerticalScrollIndicator={true}>
                 
-                {/* Secondary Action Bar (Back & Export PDF) */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
                   <TouchableOpacity onPress={() => setViewingSeasonReport(null)} style={{ paddingVertical: 4 }}>
                     <Text style={{ color: '#94a3b8', fontSize: 14, fontWeight: 'bold' }}>← Back to Reports</Text>
@@ -2631,10 +2707,8 @@ export default function App() {
                   )}
                 </View>
 
-                {/* 🌟 RICH EXECUTIVE REPORT VIEW */}
                 {parsedVaultSnapshot ? (
                   <>
-                    {/* Header Card */}
                     <View style={[styles.card, { borderColor: '#15803D', borderWidth: 2, marginBottom: 12 }]}>
                       <Text style={{ color: '#ffffff', fontSize: 22, fontWeight: '900', textTransform: 'uppercase' }}>
                         {parsedVaultSnapshot.team_name}
@@ -2647,7 +2721,6 @@ export default function App() {
                       </Text>
                     </View>
 
-                    {/* Team Record & Performance Summary */}
                     <View style={[styles.card, { marginBottom: 12 }]}>
                       <Text style={styles.sectionHeaderModal}>📊 Team Record & Performance Summary</Text>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
@@ -2677,7 +2750,6 @@ export default function App() {
                       </View>
                     </View>
 
-                    {/* Individual Season Honours */}
                     <View style={[styles.card, { marginBottom: 12 }]}>
                       <Text style={styles.sectionHeaderModal}>⭐ Individual Season Honours</Text>
                       <View style={{ marginTop: 8, gap: 8 }}>
@@ -2704,7 +2776,6 @@ export default function App() {
                       </View>
                     </View>
 
-                    {/* Head Coach Review Notes */}
                     {parsedVaultSnapshot.scout_notes ? (
                       <View style={[styles.card, { marginBottom: 12 }]}>
                         <Text style={styles.sectionHeaderModal}>Head Coach Season Review</Text>
@@ -2714,7 +2785,6 @@ export default function App() {
                       </View>
                     ) : null}
 
-                    {/* Squad Master Stats Breakdown */}
                     <View style={[styles.card, { marginBottom: 12 }]}>
                       <Text style={styles.sectionHeaderModal}>👥 Squad Master Stats Breakdown</Text>
                       <View style={{ marginTop: 8 }}>
@@ -2742,7 +2812,6 @@ export default function App() {
                       </View>
                     </View>
 
-                    {/* Season Match Archive */}
                     <View style={[styles.card, { marginBottom: 35 }]}>
                       <Text style={styles.sectionHeaderModal}>Season Match Archive & Results</Text>
                       <View style={{ marginTop: 8 }}>
@@ -2772,7 +2841,6 @@ export default function App() {
                     </View>
                   </>
                 ) : (
-                  // Fallback for older test reports saved prior to structured JSON
                   <View style={[styles.card, { borderColor: '#3b82f6' }]}>
                     <Text style={{ color: '#ffffff', fontSize: 13, lineHeight: 20 }}>
                       {viewingSeasonReport.report_text}
@@ -2781,7 +2849,6 @@ export default function App() {
                 )}
               </ScrollView>
             ) : (
-              // Archive List View
               <ScrollView style={{ flex: 1, backgroundColor: '#0B0E14', padding: 15 }}>
                 {seasonReports.length === 0 ? (
                   <Text style={{ color: '#94a3b8', textAlign: 'center', marginTop: 40 }}>
@@ -2844,6 +2911,15 @@ export default function App() {
         onClose={() => setSubReasonModalState({ visible: false, offPlayer: null, onPlayer: null })}
         subReasonModalState={subReasonModalState}
         finalizeSubWithReason={finalizeSubWithReason}
+      />
+
+      {/* 🔄 HALF-TIME BULK SUBSTITUTIONS MODAL */}
+      <HalfTimeSubModal
+        visible={isHalfTimeSubModalOpen}
+        onClose={() => setIsHalfTimeSubModalOpen(false)}
+        onPitchPlayers={onPitchPlayers}
+        subs={subs}
+        onConfirmBatchSubs={handleBatchHalfTimeSubs}
       />
 
       <FormationModal
@@ -3390,17 +3466,6 @@ export default function App() {
           </View>
         </View>
       </Modal>
-
-      <StaffManagementModal
-        visible={isStaffModalOpen}
-        onClose={() => setIsStaffModalOpen(false)}
-        activeTeamObj={activeTeamObj}
-        currentUserId={session?.user?.id}
-        userRole={profile?.role}
-        isSuperUser={isSuperUser}
-        onTeamUpdated={() => fetchUserProfile(session?.user?.id)}
-        shareStaffInvite={shareStaffInvite}
-      />
 
     </SafeAreaView>
   );
