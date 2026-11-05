@@ -358,7 +358,6 @@ export default function App() {
     const cleanCode = inputCode.trim().toUpperCase();
     setLoading(true);
 
-    // Helper: If user is stuck in onboarding, flip their profile to configured
     const markRoleConfigured = async (roleType) => {
       if (profile && !profile.role_configured) {
         await supabase.from('profiles').update({ role_configured: true, role: roleType }).eq('id', session.user.id);
@@ -1204,25 +1203,53 @@ export default function App() {
             data: { eventType: 'fulltime' }
           });
           
-          const { data: votes } = await supabase.from('parent_motm_votes').select('player_id').eq('team_id', activeTeamId);
+          // 🌟 FANS' POTM TALLY WITH TIE SUPPORT & TYPE-SAFE ID MATCHING
+          const { data: votes } = await supabase
+            .from('parent_motm_votes')
+            .select('player_id')
+            .eq('team_id', activeTeamId);
+
+          const winningPlayerIds = [];
+
           if (votes && votes.length > 0) {
             const voteCounts = {};
             let maxVotes = 0;
-            let winnerId = null;
 
-            votes.forEach(v => {
-              voteCounts[v.player_id] = (voteCounts[v.player_id] || 0) + 1;
-              if (voteCounts[v.player_id] > maxVotes) {
-                maxVotes = voteCounts[v.player_id];
-                winnerId = v.player_id;
+            votes.forEach((v) => {
+              const pid = String(v.player_id);
+              voteCounts[pid] = (voteCounts[pid] || 0) + 1;
+              if (voteCounts[pid] > maxVotes) {
+                maxVotes = voteCounts[pid];
               }
             });
 
-            if (winnerId) {
-              const winner = (teamSheet || []).find(p => p.id === winnerId);
-              if (winner) {
+            if (maxVotes > 0) {
+              Object.keys(voteCounts).forEach((pid) => {
+                if (voteCounts[pid] === maxVotes) {
+                  winningPlayerIds.push(pid);
+                }
+              });
+
+              const winningPlayers = (teamSheet || []).filter((p) =>
+                winningPlayerIds.includes(String(p.id))
+              );
+
+              // Increment stat for every tied winner
+              for (const winner of winningPlayers) {
                 await adjustMatchStat(winner, 'parent_motm', 1);
-                await broadcastEvent('🌟', `FANS' POTM: ${winner.name} (${maxVotes} Votes)`);
+              }
+
+              if (winningPlayers.length === 1) {
+                await broadcastEvent(
+                  '🌟',
+                  `FANS' POTM: ${winningPlayers[0].name} (${maxVotes} Vote${maxVotes > 1 ? 's' : ''})`
+                );
+              } else if (winningPlayers.length > 1) {
+                const names = winningPlayers.map((w) => w.name).join(' & ');
+                await broadcastEvent(
+                  '🌟',
+                  `FANS' JOINT POTM: ${names} (${maxVotes} Votes Each)`
+                );
               }
             }
           }
@@ -1278,13 +1305,19 @@ export default function App() {
             p.total_minutes_played = (p.total_minutes_played || 0) + totalMatchMins;
             p.position_minutes = currentPosMins;
             p.available = false; 
+
+            // Preserve POTM increment in final sheet state
+            if (winningPlayerIds.includes(String(p.id))) {
+              p.parent_motm = (p.parent_motm || 0) + 1;
+            }
             
             finalUpdates.push(
               supabase.from('players')
                 .update({ 
                   total_minutes_played: p.total_minutes_played, 
                   position_minutes: currentPosMins, 
-                  available: false 
+                  available: false,
+                  parent_motm: p.parent_motm
                 })
                 .eq('id', p.id)
             );
@@ -1293,6 +1326,9 @@ export default function App() {
           await Promise.all(finalUpdates);
           setTeamSheet(updatedSheet);
           setPlayerMinutesTracker({}); 
+          if (session?.user?.id) {
+            fetchTeamData(session.user.id, activeTeamId);
+          }
         }}
       ]);
     } else {
@@ -1681,15 +1717,24 @@ export default function App() {
       feedbackOurCard();
     }
 
-    const isYellow = pendingEvent?.cardType === 'yellow';
-    const icon = isYellow ? '🟨' : '🟥';
+    const cardType = pendingEvent?.cardType || 'yellow';
+    const isYellow = cardType === 'yellow';
+    const isBlue = cardType === 'blue';
+    const icon = isYellow ? '🟨' : isBlue ? '🟦' : '🟥';
     
     if (playerOrOpponent !== 'Opponent' && playerOrOpponent?.id) {
-      await adjustMatchStat(playerOrOpponent, isYellow ? 'yellow_cards' : 'red_cards', 1);
+      if (isYellow) await adjustMatchStat(playerOrOpponent, 'yellow_cards', 1);
+      if (!isYellow && !isBlue) await adjustMatchStat(playerOrOpponent, 'red_cards', 1);
     }
 
     const targetName = playerOrOpponent === 'Opponent' ? (opponentName || 'Opposition') : (playerOrOpponent?.name || 'Player');
-    const msg = `${isYellow ? 'Yellow' : 'Red'} Card: ${targetName}`;
+    const cardTitle = isYellow 
+      ? 'Yellow Card' 
+      : isBlue 
+      ? `Blue Card (${pendingEvent?.sinBinDuration || 10}m Sin Bin)` 
+      : 'Red Card (Sent Off)';
+    
+    const msg = `${cardTitle}: ${targetName}`;
     await broadcastEvent(icon, msg, pendingEvent?.minute);
   };
 
@@ -1722,7 +1767,7 @@ export default function App() {
        newTracker[offPlayer.id].totalSeconds += (displaySeconds - newTracker[offPlayer.id].lastOn);
     }
     if (!newTracker[onPlayer.id]) {
-       newTracker[onPlayer.id] = { totalSeconds: 0 };
+       newTracker[onPlayer.id].totalSeconds = 0;
     }
     newTracker[onPlayer.id].lastOn = displaySeconds;
     setPlayerMinutesTracker(newTracker);
@@ -1938,6 +1983,25 @@ export default function App() {
     );
     
     await Promise.all(autoFillUpdates);
+
+    // 📡 PEER REALTIME BROADCAST FOR TAFE FORMATION & ROSTER CHANGES
+    if (activeTeamId) {
+      try {
+        const channel = supabase.channel(`team-realtime-${activeTeamId}`);
+        await channel.send({
+          type: 'broadcast',
+          event: 'match_state_sync',
+          payload: {
+            formationChanged: true,
+            newFormation: formationName,
+            lineupAdjusted: true
+          }
+        });
+      } catch (err) {
+        console.warn("Peer broadcast notice:", err?.message);
+      }
+    }
+
     Alert.alert("TAFE Executed", `Lineup optimized for ${formationName} using ${logicType} logic.`);
   };
 
@@ -3350,6 +3414,7 @@ export default function App() {
           onPitchPlayers={onPitchPlayers}
           subs={subs}
           teamSheet={teamSheet}
+          myLinkedPlayers={myLinkedPlayers}
           selectGoalScorer={selectGoalScorer}
           selectGoalAssist={selectGoalAssist}
           selectCardType={selectCardType}
@@ -3958,4 +4023,4 @@ const styles = StyleSheet.create({
   fmtBtnActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
   fmtBtnText: { color: '#94a3b8', fontSize: 11, fontWeight: 'bold' },
   fmtBtnTextActive: { color: '#0B0E14' }
-});ok 
+});
