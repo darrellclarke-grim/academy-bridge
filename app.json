@@ -2,6 +2,7 @@
   "expo": {
     "name": "Tactical Engine",
     "slug": "tactical-playbook-app",
+    "scheme": "tacticalengine",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -15,8 +16,8 @@
       "**/*"
     ],
     "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "com.yourclub.tacticalplaybook",
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tacticalengine.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -26,7 +27,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0a192f"
       },
-      "package": "com.yourclub.tacticalplaybook"
+      "package": "com.tacticalengine.app"
     },
     "web": {
       "favicon": "./assets/icon.png",
@@ -45,7 +46,14 @@
     "owner": "darrellclarke",
     "plugins": [
       "expo-sharing",
-      "expo-audio"
+      "expo-audio",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#39FF14"
+        }
+      ]
     ]
   }
 }

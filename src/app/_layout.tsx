@@ -1,24 +1,23 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, Slot, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { createContext, useContext, useState } from 'react';
 import {
   Modal,
   Pressable,
-  SafeAreaView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   useColorScheme,
-  View
+  View,
 } from 'react-native';
 import 'react-native-gesture-handler';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
 
 SplashScreen.preventAutoHideAsync();
 
-// Sidebar Context so any component can open/close the drawer
 const SidebarContext = createContext<{
   isOpen: boolean;
   openSidebar: () => void;
@@ -31,7 +30,7 @@ const SidebarContext = createContext<{
 
 export const useSidebar = () => useContext(SidebarContext);
 
-export default function TabLayout() {
+export default function RootLayout() {
   const colorScheme = useColorScheme();
   const [isOpen, setIsOpen] = useState(false);
 
@@ -39,70 +38,83 @@ export default function TabLayout() {
   const closeSidebar = () => setIsOpen(false);
 
   return (
-    <SidebarContext.Provider value={{ isOpen, openSidebar, closeSidebar }}>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <AnimatedSplashOverlay />
-        <AppTabs />
+    <SafeAreaProvider>
+      <SidebarContext.Provider value={{ isOpen, openSidebar, closeSidebar }}>
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <StatusBar 
+            barStyle="light-content" 
+            backgroundColor="#0B0E14" 
+            translucent={false} 
+          />
+          
+          {/* Main App Container: Pushes header below Android clock & footer above Android nav buttons */}
+          <SafeAreaView style={styles.safeContainer} edges={['top', 'bottom', 'left', 'right']}>
+            <AnimatedSplashOverlay />
+            <Slot />
+          </SafeAreaView>
 
-        {/* Tactical Engine Sidebar Drawer Modal */}
-        <Modal
-          visible={isOpen}
-          animationType="fade"
-          transparent={true}
-          onRequestClose={closeSidebar}
-        >
-          <View style={styles.modalOverlay}>
-            {/* Tap outside to close */}
-            <Pressable style={styles.backdrop} onPress={closeSidebar} />
+          {/* Tactical Engine Sidebar Drawer Modal */}
+          <Modal
+            visible={isOpen}
+            animationType="fade"
+            transparent={true}
+            onRequestClose={closeSidebar}
+          >
+            <View style={styles.modalOverlay}>
+              <Pressable style={styles.backdrop} onPress={closeSidebar} />
 
-            {/* Drawer Panel */}
-            <SafeAreaView style={styles.drawerContainer}>
-              <View style={styles.drawerHeader}>
-                <Text style={styles.drawerTitle}>⚡ Tactical Engine</Text>
-                <TouchableOpacity onPress={closeSidebar} style={styles.closeButton}>
-                  <Text style={styles.closeText}>✕</Text>
-                </TouchableOpacity>
-              </View>
+              <SafeAreaView style={styles.drawerContainer} edges={['top', 'bottom']}>
+                <View style={styles.drawerHeader}>
+                  <Text style={styles.drawerTitle}>⚡ Tactical Engine</Text>
+                  <TouchableOpacity onPress={closeSidebar} style={styles.closeButton}>
+                    <Text style={styles.closeText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
 
-              <View style={styles.menuItems}>
-                <TouchableOpacity style={styles.menuItem} onPress={closeSidebar}>
-                  <Text style={styles.menuIcon}>📊</Text>
-                  <Text style={styles.menuText}>Matchday Hub</Text>
-                </TouchableOpacity>
+                <View style={styles.menuItems}>
+                  <TouchableOpacity style={styles.menuItem} onPress={closeSidebar}>
+                    <Text style={styles.menuIcon}>📊</Text>
+                    <Text style={styles.menuText}>Matchday Hub</Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity style={styles.menuItem} onPress={closeSidebar}>
-                  <Text style={styles.menuIcon}>📋</Text>
-                  <Text style={styles.menuText}>Squad RSVPs</Text>
-                </TouchableOpacity>
+                  <TouchableOpacity style={styles.menuItem} onPress={closeSidebar}>
+                    <Text style={styles.menuIcon}>📋</Text>
+                    <Text style={styles.menuText}>Squad RSVPs</Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity style={styles.menuItem} onPress={closeSidebar}>
-                  <Text style={styles.menuIcon}>🛡️</Text>
-                  <Text style={styles.menuText}>Lineup & Tactics</Text>
-                </TouchableOpacity>
+                  <TouchableOpacity style={styles.menuItem} onPress={closeSidebar}>
+                    <Text style={styles.menuIcon}>🛡️</Text>
+                    <Text style={styles.menuText}>Lineup & Tactics</Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity style={styles.menuItem} onPress={closeSidebar}>
-                  <Text style={styles.menuIcon}>🏆</Text>
-                  <Text style={styles.menuText}>Leaderboard</Text>
-                </TouchableOpacity>
+                  <TouchableOpacity style={styles.menuItem} onPress={closeSidebar}>
+                    <Text style={styles.menuIcon}>🏆</Text>
+                    <Text style={styles.menuText}>Leaderboard</Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity style={styles.menuItem} onPress={closeSidebar}>
-                  <Text style={styles.menuIcon}>⚙️</Text>
-                  <Text style={styles.menuText}>Settings</Text>
-                </TouchableOpacity>
-              </View>
+                  <TouchableOpacity style={styles.menuItem} onPress={closeSidebar}>
+                    <Text style={styles.menuIcon}>⚙️</Text>
+                    <Text style={styles.menuText}>Settings</Text>
+                  </TouchableOpacity>
+                </View>
 
-              <View style={styles.drawerFooter}>
-                <Text style={styles.footerText}>Tactical Engine v1.0.0</Text>
-              </View>
-            </SafeAreaView>
-          </View>
-        </Modal>
-      </ThemeProvider>
-    </SidebarContext.Provider>
+                <View style={styles.drawerFooter}>
+                  <Text style={styles.footerText}>Tactical Engine v1.0.0</Text>
+                </View>
+              </SafeAreaView>
+            </View>
+          </Modal>
+        </ThemeProvider>
+      </SidebarContext.Provider>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  safeContainer: {
+    flex: 1,
+    backgroundColor: '#0B0E14',
+  },
   modalOverlay: {
     flex: 1,
     flexDirection: 'row',

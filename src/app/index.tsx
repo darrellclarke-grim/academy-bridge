@@ -9,15 +9,16 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
-  SafeAreaView,
   ScrollView,
   Share,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import YoutubePlayer from 'react-native-youtube-iframe';
 import { supabase } from '../supabase';
@@ -50,6 +51,12 @@ import {
   feedbackSubstitution,
   initAudioSession
 } from '../utils/feedback';
+
+// Live Push Notifications Engine
+import {
+  dispatchTeamMatchNotification,
+  registerForPushNotificationsAsync
+} from '../utils/notifications';
 
 // Modals
 import CoachNotesStagingModal from '../modals/CoachNotesStagingModal';
@@ -91,9 +98,11 @@ export default function App() {
   // YouTube Modal State
   const [activeVideoId, setActiveVideoId] = useState(null);
 
-  // Multi-Team Management State
+  // Multi-Team & Role Entitlement State
   const [myTeams, setMyTeams] = useState([]);
   const [activeTeamId, setActiveTeamId] = useState(null);
+  const [userStaffLinks, setUserStaffLinks] = useState([]);
+  const [userParentLinks, setUserParentLinks] = useState([]);
   const [teamName, setTeamName] = useState('');
   const [teamAgeGroup, setTeamAgeGroup] = useState('U16'); 
   const [teamLogoUrl, setTeamLogoUrl] = useState('');
@@ -211,6 +220,7 @@ export default function App() {
     onPlayer: null
   });
   const [isHalfTimeSubModalOpen, setIsHalfTimeSubModalOpen] = useState(false);
+  const [pendingHalfTimeSubs, setPendingHalfTimeSubs] = useState<Array<{ offPlayer: any; onPlayer: any; reason: string }>>([]);
 
   // FA League Table WebView State
   const [faLeagueUrl, setFaLeagueUrl] = useState('');
@@ -262,33 +272,30 @@ export default function App() {
   const isAdultTeam = String(effectiveAgeGroup).toLowerCase().includes('adult');
   const is9v9Team = String(effectiveAgeGroup).toUpperCase() === 'U13';
 
-  // 🛡️ SUPERUSER ROLE LOCKDOWN
+  // 🛡️ SUPERUSER & CONTEXTUAL PERMISSIONS
   const isSuperUser = 
     profile?.role === 'superuser' || 
     session?.user?.email?.toLowerCase() === 'darrell.clarke@me.com';
 
+  const isStaffForActiveTeam = 
+    isSuperUser || 
+    activeTeamObj?.created_by === session?.user?.id || 
+    userStaffLinks.some(s => s.team_id === activeTeamId);
+
+  const isParentForActiveTeam = 
+    myLinkedPlayers.length > 0 || 
+    userParentLinks.some(p => p.team_id === activeTeamId);
+
+  // Contextual Role Auto-Adjustment
   useEffect(() => {
     if (!profile || !profile.role_configured) return;
-    const role = profile.role;
-    if (isSuperUser || role === 'superuser') return;
+    if (isSuperUser) return;
 
-    if (role === 'coach' || role === 'assistant' || role === 'admin') {
-      if (appMode !== 'coach') {
-        setAppMode('coach');
-        setCurrentTab('coachHub');
-      }
-    } else if (role === 'parent' || role === 'fan') {
-      if (appMode !== 'parent') {
-        setAppMode('parent');
-        setCurrentTab('player');
-      }
-    } else if (role === 'player') {
-      if (appMode !== 'player') {
-        setAppMode('player');
-        setCurrentTab('player');
-      }
+    if (!isStaffForActiveTeam && appMode === 'coach') {
+      setAppMode('parent');
+      setCurrentTab('player');
     }
-  }, [profile, appMode, isSuperUser]);
+  }, [activeTeamId, isStaffForActiveTeam, isSuperUser]);
 
   const activeLayout = formationLayouts[activeFormation] || formationLayouts['4-2-3-1'];
   const currentAvailablePositions = activeLayout.map(node => node.code);
@@ -342,17 +349,115 @@ export default function App() {
 
   const initialUrl = Linking.useURL();
 
+  // 🔗 UNIVERSAL CODE REDEMPTION LOGIC
+  async function handleJoinCode(inputCode) {
+    if (!inputCode || !inputCode.trim()) {
+      Alert.alert("Input Required", "Please enter a valid Join Code.");
+      return false;
+    }
+    const cleanCode = inputCode.trim().toUpperCase();
+    setLoading(true);
+
+    try {
+      const { data: headTeam } = await supabase.from('teams').select('*').eq('invite_code', cleanCode).maybeSingle();
+      if (headTeam) {
+        await supabase.from('team_staff').upsert([{ team_id: headTeam.id, user_id: session.user.id, role: 'coach' }], { onConflict: 'team_id,user_id' });
+        setActiveTeamId(headTeam.id);
+        await fetchUserProfile(session.user.id);
+        Alert.alert("Team Linked! ⚽", `You have successfully joined ${headTeam.name} as Head Coach.`);
+        return true;
+      }
+
+      const { data: staffTeam } = await supabase.from('teams').select('*').eq('staff_code', cleanCode).maybeSingle();
+      if (staffTeam) {
+        await supabase.from('team_staff').upsert([{ team_id: staffTeam.id, user_id: session.user.id, role: 'assistant' }], { onConflict: 'team_id,user_id' });
+        setActiveTeamId(staffTeam.id);
+        await fetchUserProfile(session.user.id);
+        Alert.alert("Team Linked! ⚽", `You have successfully joined ${staffTeam.name} as Assistant Coach.`);
+        return true;
+      }
+
+      const { data: adminTeam } = await supabase.from('teams').select('*').eq('admin_code', cleanCode).maybeSingle();
+      if (adminTeam) {
+        await supabase.from('team_staff').upsert([{ team_id: adminTeam.id, user_id: session.user.id, role: 'admin' }], { onConflict: 'team_id,user_id' });
+        setActiveTeamId(adminTeam.id);
+        await fetchUserProfile(session.user.id);
+        Alert.alert("Team Linked! 📋", `You have successfully joined ${adminTeam.name} as Team Administrator.`);
+        return true;
+      }
+
+      const { data: player } = await supabase.from('players').select('*, teams(id, name)').eq('family_code', cleanCode).maybeSingle();
+      if (player) {
+        await supabase.from('parent_players').upsert([{ player_id: player.id, parent_id: session.user.id, is_primary: true }], { onConflict: 'player_id,parent_id' });
+        if (player.team_id) setActiveTeamId(player.team_id);
+        setMyChildId(player.id);
+        await fetchUserProfile(session.user.id);
+        const teamTitle = player.teams?.name || 'Squad';
+        Alert.alert("Player Linked! 🌟", `Successfully linked ${player.name} (${teamTitle}) to your account.`);
+        return true;
+      }
+
+      const { data: fanTeam } = await supabase.from('teams').select('*').eq('fan_code', cleanCode).maybeSingle();
+      if (fanTeam) {
+        setActiveTeamId(fanTeam.id);
+        await fetchUserProfile(session.user.id);
+        Alert.alert("Joined as Fan! 📣", `You are now following ${fanTeam.name}.`);
+        return true;
+      }
+
+      Alert.alert("Invalid Code", `No team or player found with code: ${cleanCode}. Please verify with your Head Coach.`);
+      return false;
+    } catch (err) {
+      Alert.alert("Linking Error", err?.message || "Failed to join team.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Deep Link Interception (Cold Start)
   useEffect(() => {
     if (initialUrl) {
       const parsed = Linking.parse(initialUrl);
       const codeParam = parsed.queryParams?.code;
       if (codeParam) {
         const cleanCode = String(codeParam).trim().toUpperCase();
-        setFamilyCodeInput(cleanCode);
-        setOnboardingStep('parent_notice'); 
+        if (!session) {
+          setFamilyCodeInput(cleanCode);
+          setOnboardingStep('parent_notice'); 
+        } else {
+          Alert.alert(
+            "Team Invite Detected",
+            `Would you like to add the team associated with code "${cleanCode}" to your account?`,
+            [
+              { text: "Cancel", style: "cancel" },
+              { text: "Join Team", onPress: () => handleJoinCode(cleanCode) }
+            ]
+          );
+        }
       }
     }
-  }, [initialUrl]);
+  }, [initialUrl, session]);
+
+  // Deep Link Interception (Background)
+  useEffect(() => {
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      const parsed = Linking.parse(url);
+      const codeParam = parsed.queryParams?.code;
+      if (codeParam && session) {
+        const cleanCode = String(codeParam).trim().toUpperCase();
+        Alert.alert(
+          "Team Invite Detected",
+          `Would you like to add the team associated with code "${cleanCode}" to your account?`,
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Join Team", onPress: () => handleJoinCode(cleanCode) }
+          ]
+        );
+      }
+    });
+    return () => sub.remove();
+  }, [session]);
 
   const openDrillVideo = (url) => {
     const videoId = getYouTubeId(url);
@@ -412,7 +517,7 @@ export default function App() {
             ].filter(Boolean);
 
             builtCurriculum[w] = {
-              theme: `${row.phase_name} -${row.focus_theme}`,
+              theme: `${row.phase_name} - ${row.focus_theme}`,
               principle: mainD?.title || 'Tactical Execution',
               question: mainD?.tactical_objective || 'How do we exploit space under pressure?',
               overviewVideoUrl: mainD?.video_url || rondo?.video_url,
@@ -497,6 +602,21 @@ export default function App() {
     }
   };
 
+  // 📡 REALTIME BROADCAST DISPATCHERS
+  async function broadcastMatchSync(statePayload) {
+    if (!activeTeamId) return;
+    try {
+      const channel = supabase.channel(`team-realtime-${activeTeamId}`);
+      await channel.send({
+        type: 'broadcast',
+        event: 'match_state_sync',
+        payload: statePayload
+      });
+    } catch (err) {
+      console.warn("Peer broadcast notice:", err?.message);
+    }
+  }
+
   async function broadcastEvent(icon, text, explicitMinute = null) {
     if (!activeTeamId) return;
     const min = explicitMinute || `${Math.floor(displaySeconds / 60)}'`;
@@ -508,7 +628,7 @@ export default function App() {
       const { error } = await supabase.from('live_ticker').insert([newEvent]);
       if (error) throw error;
     } catch (err) {
-      console.warn("⚠️ Signal drop: Enqueuing event locally to device storage.");
+      console.warn("Signal drop: Enqueuing event locally to device storage.");
       await enqueueOfflineEvent({ table: 'live_ticker', payload: newEvent });
       const queue = await getOfflineQueue();
       useMatchdayStore.getState().setPendingOfflineCount(queue.length);
@@ -523,7 +643,32 @@ export default function App() {
       .eq('team_id', teamId)
       .order('created_at', { ascending: false })
       .limit(30);
-    if (data) setLiveTicker(data || []);
+
+    if (data) {
+      setLiveTicker(data || []);
+
+      if (data.length > 0) {
+        const kickoffEvt = data.find(e => e.message && e.message.includes('Kick-Off vs'));
+        if (kickoffEvt) {
+          const matchDetails = kickoffEvt.message.match(/Kick-Off vs (.*?) \[(.*?) MATCH\]/);
+          if (matchDetails) {
+            setOpponentName(matchDetails[1]);
+            setMatchType(matchDetails[2].toLowerCase());
+          }
+        }
+
+        const latestWhistle = data.find(e => e.icon === '⏱️' || e.icon === '🛑' || e.icon === '🏁');
+        if (latestWhistle) {
+          if (latestWhistle.message.includes('2nd Half Kick-Off')) {
+            if (matchPhase !== '2ND HALF') setMatchPhase('2ND HALF');
+          } else if (latestWhistle.message.includes('Half-Time')) {
+            if (matchPhase !== 'HALF-TIME') setMatchPhase('HALF-TIME');
+          } else if (latestWhistle.message.includes('1st Half Kick-Off')) {
+            if (matchPhase !== '1ST HALF') setMatchPhase('1ST HALF');
+          }
+        }
+      }
+    }
   }
 
   async function fetchMatchHistory(teamId) {
@@ -534,9 +679,7 @@ export default function App() {
       .eq('team_id', teamId)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error("❌ Fetch Match History Error:", error);
-    } else if (data) {
+    if (!error && data) {
       setMatchHistory(data);
     }
   }
@@ -554,6 +697,7 @@ export default function App() {
     }
   }
 
+  // 🌐 MULTI-TEAM DATA SYNC & PUSH TOKEN REGISTRATION
   async function fetchUserProfile(userId) {
     setLoading(true);
     const startTime = Date.now();
@@ -567,22 +711,40 @@ export default function App() {
 
       if (profileData) {
         setProfile(profileData);
-        if (profileData.role === 'coach' || profileData.role === 'assistant' || profileData.role === 'admin') {
-          setAppMode('coach');
-          setCurrentTab('coachHub');
-        }
       }
 
+      registerForPushNotificationsAsync(userId);
+
+      // 1. Staff Teams
       const { data: staffLinks } = await supabase
         .from('team_staff')
-        .select('team_id')
+        .select('team_id, role')
         .eq('user_id', userId);
+      setUserStaffLinks(staffLinks || []);
+      const staffTeamIds = (staffLinks || []).map(s => s.team_id);
 
-      const linkedTeamIds = (staffLinks || []).map(s => s.team_id);
+      // 2. Parent / Player Teams
+      const { data: parentLinks } = await supabase
+        .from('parent_players')
+        .select('player_id')
+        .eq('parent_id', userId);
+
+      let parentTeamIds = [];
+      if (parentLinks && parentLinks.length > 0) {
+        const playerIds = parentLinks.map(p => p.player_id);
+        const { data: linkedPlayers } = await supabase
+          .from('players')
+          .select('team_id, id')
+          .in('id', playerIds);
+        setUserParentLinks(linkedPlayers || []);
+        parentTeamIds = (linkedPlayers || []).map(p => p.team_id).filter(Boolean);
+      }
+
+      const allUniqueTeamIds = Array.from(new Set([...staffTeamIds, ...parentTeamIds]));
 
       let teamQuery = supabase.from('teams').select('*');
-      if (linkedTeamIds.length > 0) {
-        teamQuery = teamQuery.or(`created_by.eq.${userId},id.in.(${linkedTeamIds.join(',')})`);
+      if (allUniqueTeamIds.length > 0) {
+        teamQuery = teamQuery.or(`created_by.eq.${userId},id.in.(${allUniqueTeamIds.join(',')})`);
       } else {
         teamQuery = teamQuery.eq('created_by', userId);
       }
@@ -602,7 +764,7 @@ export default function App() {
         setMyTeams([]);
       }
     } catch (err) {
-      console.error("❌ Critical Error in fetchUserProfile:", err);
+      console.error("Critical Error in fetchUserProfile:", err);
     } finally {
       const elapsedTime = Date.now() - startTime;
       const remainingDelay = Math.max(0, 1000 - elapsedTime);
@@ -664,12 +826,10 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.error("❌ Auth Error:", err);
       setAuthMessage({ text: err.message || 'Authentication error occurred.', type: 'error' });
       setLoading(false);
     }
   }
-
   useEffect(() => {
     let initialMount = true;
     initAudioSession();
@@ -737,35 +897,80 @@ export default function App() {
     }
   }, [appMode, effectiveAgeGroup, playerTab]);
 
+  // ⚡ SUPABASE REALTIME WEBSOCKET LISTENERS
   useEffect(() => {
-    if (activeTeamId) {
-      supabase
-        .from('teams')
-        .select('fa_league_table_url, age_group, logo_url, default_formation')
-        .eq('id', activeTeamId)
-        .single()
-        .then(({ data, error }) => {
-          if (data) {
-            setFaLeagueUrl(data.fa_league_table_url || '');
-            const ageGrp = data.age_group || 'U16';
-            setTeamAgeGroup(ageGrp);
-            if (data.logo_url) setTeamLogoUrl(data.logo_url || '');
+    if (!activeTeamId) return;
 
-            const is9v9 = String(ageGrp).toUpperCase() === 'U13';
-            const teamFmt = data.default_formation || (is9v9 ? '3-3-2' : '4-2-3-1');
+    supabase
+      .from('teams')
+      .select('fa_league_table_url, age_group, logo_url, default_formation')
+      .eq('id', activeTeamId)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setFaLeagueUrl(data.fa_league_table_url || '');
+          const ageGrp = data.age_group || 'U16';
+          setTeamAgeGroup(ageGrp);
+          if (data.logo_url) setTeamLogoUrl(data.logo_url || '');
 
-            setActiveFormation(teamFmt);
-            setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, default_formation: teamFmt, age_group: ageGrp } : t));
-          }
-        });
+          const is9v9 = String(ageGrp).toUpperCase() === 'U13';
+          const teamFmt = data.default_formation || (is9v9 ? '3-3-2' : '4-2-3-1');
 
-      fetchTeamData(session?.user?.id, activeTeamId);
-      fetchMatchNotes(activeTeamId);
-      fetchLiveTicker(activeTeamId);
-      fetchMatchHistory(activeTeamId);
-      fetchSeasonReports(activeTeamId);
-    }
-  }, [activeTeamId]);
+          setActiveFormation(teamFmt);
+          setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, default_formation: teamFmt, age_group: ageGrp } : t));
+        }
+      });
+
+    fetchTeamData(session?.user?.id, activeTeamId);
+    fetchMatchNotes(activeTeamId);
+    fetchLiveTicker(activeTeamId);
+    fetchMatchHistory(activeTeamId);
+    fetchSeasonReports(activeTeamId);
+
+    const liveChannel = supabase
+      .channel(`team-realtime-${activeTeamId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'live_ticker', filter: `team_id=eq.${activeTeamId}` },
+        () => fetchLiveTicker(activeTeamId)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'match_history', filter: `team_id=eq.${activeTeamId}` },
+        () => fetchMatchHistory(activeTeamId)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'players', filter: `team_id=eq.${activeTeamId}` },
+        () => fetchTeamData(session?.user?.id, activeTeamId)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'match_notes', filter: `team_id=eq.${activeTeamId}` },
+        () => fetchMatchNotes(activeTeamId)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'parent_players' },
+        () => fetchTeamData(session?.user?.id, activeTeamId)
+      )
+      .on('broadcast', { event: 'match_state_sync' }, ({ payload }) => {
+        if (!payload) return;
+        if (payload.matchPhase !== undefined) setMatchPhase(payload.matchPhase);
+        if (payload.opponentName !== undefined) setOpponentName(payload.opponentName);
+        if (payload.matchType !== undefined) setMatchType(payload.matchType);
+        if (payload.teamScore !== undefined) setTeamScore(payload.teamScore);
+        if (payload.opponentScore !== undefined) setOpponentScore(payload.opponentScore);
+        if (payload.matchStartTimestamp !== undefined) setMatchStartTimestamp(payload.matchStartTimestamp);
+        if (payload.accumulatedSeconds !== undefined) setAccumulatedSeconds(payload.accumulatedSeconds);
+        if (payload.displaySeconds !== undefined) setDisplaySeconds(payload.displaySeconds);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(liveChannel);
+    };
+  }, [activeTeamId, session?.user?.id]);
 
   useEffect(() => {
     let interval;
@@ -778,12 +983,6 @@ export default function App() {
     }
     return () => clearInterval(interval);
   }, [matchPhase, matchStartTimestamp, accumulatedSeconds]);
-
-  const formatTime = (totalSeconds) => {
-    const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
-    const s = (totalSeconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
 
   const getPhaseButtonText = () => {
     if (matchPhase === 'PRE-MATCH') return '⏱ Start 1st Half';
@@ -798,6 +997,7 @@ export default function App() {
     setCurrentTab(mode === 'coach' ? 'coachHub' : 'player');
   };
 
+  // ⏱️ MATCH PHASE CONTROLLER WITH REALTIME BROADCASTING
   const handlePhaseChange = () => {
     if (!activeTeamId) return;
 
@@ -817,10 +1017,11 @@ export default function App() {
       Alert.alert("Start 1st Half", `Kick off against ${opponentName} [${matchType.toUpperCase()} MATCH]?`, [
         { text: "Cancel", style: "cancel" },
         { text: "Start", onPress: async () => {
+          const now = Date.now();
           setMatchPhase('1ST HALF');
           setAccumulatedSeconds(0);
           setDisplaySeconds(0);
-          setMatchStartTimestamp(Date.now());
+          setMatchStartTimestamp(now);
           
           feedbackKickoffWhistle();
           
@@ -832,6 +1033,25 @@ export default function App() {
           
           await broadcastEvent('⏱️', `1st Half Kick-Off vs ${opponentName} [${matchType.toUpperCase()} MATCH]`, '0\'');
           
+          broadcastMatchSync({
+            matchPhase: '1ST HALF',
+            opponentName,
+            matchType,
+            teamScore: 0,
+            opponentScore: 0,
+            matchStartTimestamp: now,
+            accumulatedSeconds: 0,
+            displaySeconds: 0
+          });
+
+          dispatchTeamMatchNotification({
+            teamId: activeTeamId,
+            senderUserId: session?.user?.id,
+            title: `⏱️ Kick-Off! vs ${opponentName}`,
+            body: `${activeTeamObj?.name || 'Our Team'} vs ${opponentName} [${matchType.toUpperCase()}] is underway!`,
+            data: { eventType: 'kickoff' }
+          });
+
           const availablePlayers = teamSheet.filter(p => p.available);
           if (availablePlayers.length > 0) {
             const appUpdates = availablePlayers.map(p => 
@@ -853,22 +1073,58 @@ export default function App() {
           feedbackFulltimeWhistle();
           
           const newTracker = { ...playerMinutesTracker };
-          teamSheet.forEach(p => {
+          const htDbUpdates = [];
+          const updatedSheet = [...teamSheet];
+
+          updatedSheet.forEach(p => {
             if (p.is_starter && p.available && newTracker[p.id]) {
-              newTracker[p.id].totalSeconds += (displaySeconds - newTracker[p.id].lastOn);
+              const elapsed1stHalf = displaySeconds - (newTracker[p.id].lastOn || 0);
+              newTracker[p.id].totalSeconds += elapsed1stHalf;
+              newTracker[p.id].lastOn = displaySeconds;
+
+              const mins = Math.floor(elapsed1stHalf / 60);
+              const pos = p.matchday_position;
+              if (mins > 0 && pos && pos !== 'Bench') {
+                const currentPosMins = { ...(p.position_minutes || {}) };
+                currentPosMins[pos] = (currentPosMins[pos] || 0) + mins;
+                p.position_minutes = currentPosMins;
+                htDbUpdates.push(
+                  supabase.from('players').update({ position_minutes: currentPosMins }).eq('id', p.id)
+                );
+              }
             }
           });
-          setPlayerMinutesTracker(newTracker);
 
+          if (htDbUpdates.length > 0) {
+            await Promise.all(htDbUpdates);
+          }
+
+          setTeamSheet(updatedSheet);
+          setPlayerMinutesTracker(newTracker);
           await broadcastEvent('🛑', 'Half-Time Whistle');
+
+          broadcastMatchSync({
+            matchPhase: 'HALF-TIME',
+            matchStartTimestamp: null,
+            accumulatedSeconds: displaySeconds
+          });
+
+          dispatchTeamMatchNotification({
+            teamId: activeTeamId,
+            senderUserId: session?.user?.id,
+            title: `🛑 Half-Time: ${teamScore} - ${opponentScore}`,
+            body: `Half-time interval vs ${opponentName}. Score: ${teamScore} - ${opponentScore}.`,
+            data: { eventType: 'halftime' }
+          });
         }}
       ]);
     } else if (matchPhase === 'HALF-TIME') {
       Alert.alert("Start 2nd Half", "Ready to kick off the second half?", [
         { text: "Cancel", style: "cancel" },
         { text: "Start", onPress: async () => {
+          const now = Date.now();
           setMatchPhase('2ND HALF');
-          setMatchStartTimestamp(Date.now());
+          setMatchStartTimestamp(now);
           
           feedbackKickoffWhistle();
           
@@ -881,7 +1137,31 @@ export default function App() {
           });
           setPlayerMinutesTracker(newTracker);
 
-          await broadcastEvent('⏱️', '2nd Half Kick-Off!');
+          const currentMin = `${Math.floor(displaySeconds / 60)}'`;
+          await broadcastEvent('⏱️', '2nd Half Kick-Off!', currentMin);
+
+          broadcastMatchSync({
+            matchPhase: '2ND HALF',
+            matchStartTimestamp: now
+          });
+
+          let htSubCount = 0;
+          if (pendingHalfTimeSubs && pendingHalfTimeSubs.length > 0) {
+            htSubCount = pendingHalfTimeSubs.length;
+            const subLines = pendingHalfTimeSubs.map(
+              s => `${s.onPlayer.name} ON for ${s.offPlayer.name} [Reason: ${s.reason || "Coach's Decision"}]`
+            );
+            await broadcastEvent('🔄', `HALF-TIME SUBS:\n• ${subLines.join('\n• ')}`, currentMin);
+            setPendingHalfTimeSubs([]);
+          }
+
+          dispatchTeamMatchNotification({
+            teamId: activeTeamId,
+            senderUserId: session?.user?.id,
+            title: `⏱️ 2nd Half Kick-Off! vs ${opponentName}`,
+            body: `Second half is underway!${htSubCount > 0 ? ` (${htSubCount} tactical sub${htSubCount > 1 ? 's' : ''} made)` : ''}`,
+            data: { eventType: 'second_half' }
+          });
         }}
       ]);
     } else if (matchPhase === '2ND HALF') {
@@ -893,8 +1173,21 @@ export default function App() {
           setMatchStartTimestamp(null);
           
           feedbackFulltimeWhistle();
-          
           await broadcastEvent('🏁', 'Full-Time Whistle!');
+
+          broadcastMatchSync({
+            matchPhase: 'FULL-TIME',
+            matchStartTimestamp: null,
+            accumulatedSeconds: displaySeconds
+          });
+
+          dispatchTeamMatchNotification({
+            teamId: activeTeamId,
+            senderUserId: session?.user?.id,
+            title: `🏁 Full-Time: ${teamScore} - ${opponentScore} vs ${opponentName}`,
+            body: `Final whistle! Result: ${teamScore} - ${opponentScore}. Tap to vote for Player of the Match! ⭐`,
+            data: { eventType: 'fulltime' }
+          });
           
           const { data: votes } = await supabase.from('parent_motm_votes').select('player_id').eq('team_id', activeTeamId);
           if (votes && votes.length > 0) {
@@ -934,14 +1227,12 @@ export default function App() {
           };
 
           const { error: insertErr } = await supabase.from('match_history').insert([matchPayload]);
-          if (insertErr) {
-            console.error("❌ Match History Insert Error:", insertErr);
-            Alert.alert("Save Error", `Match report failed to save: ${insertErr.message}`);
-          } else {
+          if (!insertErr) {
             await supabase.from('live_ticker').delete().eq('team_id', activeTeamId);
             await supabase.from('parent_motm_votes').delete().eq('team_id', activeTeamId);
 
             resetMatchState();
+            setPendingHalfTimeSubs([]);
 
             Alert.alert("Match Finalized", "Report saved to Match Archive! Live pitch reset for your next match.");
             fetchMatchHistory(activeTeamId);
@@ -952,22 +1243,24 @@ export default function App() {
           const updatedSheet = [...teamSheet];
 
           updatedSheet.forEach(p => {
-            let totalMinsAdded = 0;
-            let currentPosMins = p.position_minutes || {};
+            let mins2ndHalf = 0;
+            let currentPosMins = { ...(p.position_minutes || {}) };
 
             if (p.is_starter && p.available && newTracker[p.id]) {
-              newTracker[p.id].totalSeconds += (displaySeconds - newTracker[p.id].lastOn);
+              const elapsed2ndHalf = displaySeconds - (newTracker[p.id].lastOn || displaySeconds);
+              newTracker[p.id].totalSeconds += elapsed2ndHalf;
+              mins2ndHalf = Math.floor(elapsed2ndHalf / 60);
             }
             
-            if (newTracker[p.id]) {
-              totalMinsAdded = Math.floor(newTracker[p.id].totalSeconds / 60);
+            if (mins2ndHalf > 0) {
               const posPlayed = p.matchday_position;
               if (posPlayed && posPlayed !== 'Bench') {
-                 currentPosMins[posPlayed] = (currentPosMins[posPlayed] || 0) + totalMinsAdded;
+                 currentPosMins[posPlayed] = (currentPosMins[posPlayed] || 0) + mins2ndHalf;
               }
             }
             
-            p.total_minutes_played = (p.total_minutes_played || 0) + totalMinsAdded;
+            const totalMatchMins = Math.floor((newTracker[p.id]?.totalSeconds || 0) / 60);
+            p.total_minutes_played = (p.total_minutes_played || 0) + totalMatchMins;
             p.position_minutes = currentPosMins;
             p.available = false; 
             
@@ -975,7 +1268,7 @@ export default function App() {
               supabase.from('players')
                 .update({ 
                   total_minutes_played: p.total_minutes_played, 
-                  position_minutes: currentPosMins,
+                  position_minutes: currentPosMins, 
                   available: false 
                 })
                 .eq('id', p.id)
@@ -993,10 +1286,20 @@ export default function App() {
         { text: "Reset", style: "destructive", onPress: async () => {
             feedbackFulltimeWhistle();
             resetMatchState();
+            setPendingHalfTimeSubs([]);
             setPlayerMinutesTracker({});
             await supabase.from('live_ticker').delete().eq('team_id', activeTeamId);
             await supabase.from('parent_motm_votes').delete().eq('team_id', activeTeamId).not('parent_id', 'is', null);
             
+            broadcastMatchSync({
+              matchPhase: 'PRE-MATCH',
+              teamScore: 0,
+              opponentScore: 0,
+              matchStartTimestamp: null,
+              accumulatedSeconds: 0,
+              displaySeconds: 0
+            });
+
             const rsvpResetUpdates = teamSheet.map(p => supabase.from('players').update({ available: false }).eq('id', p.id));
             await Promise.all(rsvpResetUpdates);
             setTeamSheet(prev => prev.map(p => ({ ...p, available: false })));
@@ -1004,6 +1307,25 @@ export default function App() {
       ]);
     }
   };
+
+  // 📋 BATCH RSVP CONTROLLER (ADD ALL / REMOVE ALL)
+  async function batchToggleRSVP() {
+    if (!activeTeamId || !teamSheet || teamSheet.length === 0) return;
+    const allIn = teamSheet.every(p => p && p.available);
+    const targetStatus = !allIn; 
+
+    setTeamSheet(prev => (prev || []).map(p => p ? { ...p, available: targetStatus } : p));
+
+    const { error } = await supabase
+      .from('players')
+      .update({ available: targetStatus })
+      .eq('team_id', activeTeamId);
+
+    if (error) {
+      Alert.alert("RSVP Update Error", error.message);
+      fetchTeamData(session?.user?.id, activeTeamId);
+    }
+  }
 
   const startNewSeasonFlow = async () => {
     if (seasonResetConfirmText.trim().toUpperCase() !== 'RESET SEASON') {
@@ -1075,16 +1397,12 @@ export default function App() {
         }))
       };
 
-      const { error: archiveErr } = await supabase.from('season_reports').insert([{
+      await supabase.from('season_reports').insert([{
         team_id: activeTeamId,
         season_label: seasonLabel,
         report_text: JSON.stringify(vaultSnapshot),
         created_at: new Date().toISOString()
       }]);
-
-      if (archiveErr) {
-        console.error("❌ Season Vault Save Error:", archiveErr);
-      }
 
       try {
         await generateSeasonPdfReport({
@@ -1119,14 +1437,10 @@ export default function App() {
         }).eq('id', p.id)
       );
 
-      const { error: teamUpdateErr } = await supabase
+      await supabase
         .from('teams')
         .update({ age_group: nextAgeGroup, name: promotedTeamName })
         .eq('id', activeTeamId);
-
-      if (teamUpdateErr) {
-        console.error("❌ Team Age Promotion Error:", teamUpdateErr);
-      }
 
       await Promise.all([
         ...resetPlayerPromises,
@@ -1156,7 +1470,6 @@ export default function App() {
       );
 
     } catch (err) {
-      console.error("❌ Season Reset Error:", err);
       setIsSavingSeason(false);
       Alert.alert("Reset Error", err.message);
     }
@@ -1248,11 +1561,17 @@ export default function App() {
   const finishGoalFlow = async (scorer, assist) => {
     setLiveEventMode('none');
 
-    // Dual-route Audio-Tactile: Cheer for our squad, groan for opponent
+    let newTeamScore = teamScore;
+    let newOppScore = opponentScore;
+
     if (scorer === 'Opponent') {
       feedbackOpponentGoal();
+      newOppScore += 1;
+      setOpponentScore(newOppScore);
     } else {
       feedbackOurGoal();
+      newTeamScore += 1;
+      setTeamScore(newTeamScore);
     }
 
     if (scorer !== 'Opponent' && scorer?.id) await adjustMatchStat(scorer, 'goals', 1);
@@ -1261,25 +1580,34 @@ export default function App() {
     let msg = '';
     if (scorer === 'Opponent') {
       msg = `Goal for ${opponentName || 'Opposition'}! ⚽`;
-      setOpponentScore((prev) => prev + 1);
     } else {
       msg = `GOAL! ${scorer?.name || 'Player'} ⚽`;
       if (assist !== 'None' && assist?.name) msg += `\n(Assist: ${assist.name})`;
-      setTeamScore((prev) => prev + 1);
     }
+    
     await broadcastEvent('⚽', msg, pendingEvent?.minute);
+
+    broadcastMatchSync({
+      teamScore: newTeamScore,
+      opponentScore: newOppScore
+    });
+
+    dispatchTeamMatchNotification({
+      teamId: activeTeamId,
+      senderUserId: session?.user?.id,
+      title: `⚽ GOAL! (${newTeamScore} - ${newOppScore})`,
+      body: msg,
+      data: { eventType: 'goal' }
+    });
   };
 
-  // 🔄 HALF-TIME BULK SUBSTITUTIONS PROCESSOR
   const handleBatchHalfTimeSubs = async (swaps) => {
     if (!swaps || swaps.length === 0) return;
 
-    // Trigger substitution audio once
     feedbackSubstitution();
 
     const newTracker = { ...playerMinutesTracker };
     const dbUpdates = [];
-    const changeDescriptions = [];
 
     setTeamSheet(prev => {
       let updatedSheet = [...prev];
@@ -1287,29 +1615,23 @@ export default function App() {
       swaps.forEach(({ offPlayer, onPlayer }) => {
         const targetPos = offPlayer.matchday_position || offPlayer.position || 'DEFAULT';
 
-        // 1. Accrue 1st half minutes for offPlayer
         if (newTracker[offPlayer.id]) {
-          newTracker[offPlayer.id].totalSeconds += (displaySeconds - newTracker[offPlayer.id].lastOn);
+          newTracker[offPlayer.id].totalSeconds += (displaySeconds - (newTracker[offPlayer.id].lastOn || 0));
         }
 
-        // 2. Queue onPlayer to start fresh with displaySeconds at 2nd half kick-off
         if (!newTracker[onPlayer.id]) {
           newTracker[onPlayer.id] = { totalSeconds: 0 };
         }
         newTracker[onPlayer.id].lastOn = displaySeconds;
 
-        // 3. Update memory state
         updatedSheet = updatedSheet.map(p => {
           if (p.id === offPlayer.id) return { ...p, matchday_position: 'Bench', is_starter: false };
           if (p.id === onPlayer.id) return { ...p, matchday_position: targetPos, is_starter: true };
           return p;
         });
 
-        // 4. Queue Supabase updates
         dbUpdates.push(supabase.from('players').update({ matchday_position: 'Bench', is_starter: false }).eq('id', offPlayer.id));
         dbUpdates.push(supabase.from('players').update({ matchday_position: targetPos, is_starter: true }).eq('id', onPlayer.id));
-
-        changeDescriptions.push(`${onPlayer.name} ON for ${offPlayer.name}`);
       });
 
       return updatedSheet;
@@ -1317,13 +1639,14 @@ export default function App() {
 
     setPlayerMinutesTracker(newTracker);
     await Promise.all(dbUpdates);
+    setPendingHalfTimeSubs(prev => [...prev, ...swaps]);
 
-    // Single consolidated ticker broadcast
-    const min = `${Math.floor(displaySeconds / 60)}' (HT)`;
-    await broadcastEvent('🔄', `HALF-TIME SUBS: ${changeDescriptions.join(', ')}`, min);
-
-    Alert.alert("Half-Time Subs Applied", `${swaps.length} changes confirmed. Pitch updated for 2nd half kick-off.`);
+    Alert.alert(
+      "Changes Confirmed",
+      `${swaps.length} substitution(s) set. Pitch roster updated; broadcast will post to the ticker when the second half kicks off.`
+    );
   };
+
   const initCardFlow = () => {
     const min = `${Math.floor(displaySeconds / 60)}'`;
     setPendingEvent({ minute: min, type: 'card' });
@@ -1338,7 +1661,6 @@ export default function App() {
   const finishCardFlow = async (playerOrOpponent) => {
     setLiveEventMode('none');
 
-    // Dual-route Card Audio-Tactile feedback
     if (playerOrOpponent === 'Opponent') {
       feedbackOpponentCard();
     } else {
@@ -1377,7 +1699,6 @@ export default function App() {
     setSubReasonModalState({ visible: false, offPlayer: null, onPlayer: null });
     if (!offPlayer || !onPlayer) return;
 
-    // Trigger substitution voice line & firm vibration bump
     feedbackSubstitution();
 
     const onTargetPos = offPlayer.matchday_position || offPlayer.position || 'DEFAULT';
@@ -1560,7 +1881,7 @@ export default function App() {
             }
       }
 
-      if (!bestMatch) {
+      if (!bestMatch && !isGkSlot) {
           const mappedProfile = mapSlotToProfilePos(slot.code);
           matches = baseCandidates.filter(p => p.position === mappedProfile || p.secondary_position === mappedProfile);
           if (matches.length > 0) {
@@ -1689,57 +2010,10 @@ export default function App() {
     setLoading(true);
 
     try {
-      const { data: headTeam } = await supabase.from('teams').select('*').eq('invite_code', cleanCode).maybeSingle();
-      if (headTeam) {
-        await supabase.from('team_staff').upsert([{ team_id: headTeam.id, user_id: session.user.id, role: 'coach' }], { onConflict: 'team_id,user_id' });
-        await supabase.from('profiles').update({ role: 'coach', role_configured: true }).eq('id', session.user.id);
-        setAppMode('coach');
-        setActiveTeamId(headTeam.id);
-        await fetchUserProfile(session.user.id);
-        return;
+      const res = await handleJoinCode(cleanCode);
+      if (res) {
+        setOnboardingStep('choose_path');
       }
-
-      const { data: staffTeam } = await supabase.from('teams').select('*').eq('staff_code', cleanCode).maybeSingle();
-      if (staffTeam) {
-        await supabase.from('team_staff').upsert([{ team_id: staffTeam.id, user_id: session.user.id, role: 'assistant' }], { onConflict: 'team_id,user_id' });
-        await supabase.from('profiles').update({ role: 'assistant', role_configured: true }).eq('id', session.user.id);
-        setAppMode('coach');
-        setActiveTeamId(staffTeam.id);
-        await fetchUserProfile(session.user.id);
-        return;
-      }
-
-      const { data: adminTeam } = await supabase.from('teams').select('*').eq('admin_code', cleanCode).maybeSingle();
-      if (adminTeam) {
-        await supabase.from('team_staff').upsert([{ team_id: adminTeam.id, user_id: session.user.id, role: 'admin' }], { onConflict: 'team_id,user_id' });
-        await supabase.from('profiles').update({ role: 'admin', role_configured: true }).eq('id', session.user.id);
-        setAppMode('coach');
-        setActiveTeamId(adminTeam.id);
-        await fetchUserProfile(session.user.id);
-        return;
-      }
-
-      const { data: player } = await supabase.from('players').select('*').eq('family_code', cleanCode).maybeSingle();
-      if (player) {
-        await supabase.from('parent_players').insert([{ player_id: player.id, parent_id: session.user.id, is_primary: true }]);
-        await supabase.from('profiles').update({ role: 'parent', role_configured: true }).eq('id', session.user.id);
-        setMyChildId(player.id);
-        if (player.team_id) setActiveTeamId(player.team_id);
-        setAppMode('parent');
-        await fetchUserProfile(session.user.id);
-        return;
-      }
-
-      const { data: fanTeam } = await supabase.from('teams').select('*').eq('fan_code', cleanCode).maybeSingle();
-      if (fanTeam) {
-        await supabase.from('profiles').update({ role: 'fan', role_configured: true }).eq('id', session.user.id);
-        setActiveTeamId(fanTeam.id);
-        setAppMode('parent');
-        await fetchUserProfile(session.user.id);
-        return;
-      }
-
-      setAuthMessage({ text: '❌ Invalid Join Code. Please request a valid code from your Head Coach.', type: 'error' });
     } catch (err) {
       setAuthMessage({ text: 'Error verifying join code. Please try again.', type: 'error' });
     } finally {
@@ -1902,13 +2176,7 @@ export default function App() {
       .select();
 
     if (error) {
-      console.error("❌ FA Link Save Error:", error);
       Alert.alert("Database Error", error.message);
-      return;
-    }
-
-    if (!data || data.length === 0) {
-      Alert.alert("Save Error", "0 rows updated. Ensure RLS is configured on 'teams'.");
       return;
     }
 
@@ -1933,7 +2201,6 @@ export default function App() {
       .select();
 
     if (error) {
-      console.error("❌ Logo URL Save Error:", error);
       Alert.alert("Database Error", error.message);
       return;
     }
@@ -2179,1295 +2446,1323 @@ export default function App() {
   };
 
   const SUPABASE_LOGO_URL = 'https://jnogngcywfgitzryooig.supabase.co/storage/v1/object/public/app-assets/Tactical%20Engine%20Logo.png';
-
   if (loading) {
     return (
-      <SafeAreaView style={styles.splashContainer}>
-        <View style={styles.splashCenterBox}>
-          <Image
-            source={{ uri: SUPABASE_LOGO_URL }}
-            style={styles.splashLogoImage}
-            resizeMode="contain"
-          />
-          <ActivityIndicator size="large" color="#39FF14" style={{ marginTop: 20 }} />
-          <Text style={styles.splashLoadingText}>TACTICAL ENGINE LOADING...</Text>
-        </View>
-      </SafeAreaView>
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.splashContainer} edges={['top', 'bottom']}>
+          <StatusBar barStyle="light-content" backgroundColor="#0B0E14" />
+          <View style={styles.splashCenterBox}>
+            <Image
+              source={{ uri: SUPABASE_LOGO_URL }}
+              style={styles.splashLogoImage}
+              resizeMode="contain"
+            />
+            <ActivityIndicator size="large" color="#39FF14" style={{ marginTop: 20 }} />
+            <Text style={styles.splashLoadingText}>TACTICAL ENGINE LOADING...</Text>
+          </View>
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
   if (!session) {
     return (
-      <SafeAreaView style={styles.authContainer}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
-            <View style={styles.authBox}>
-              <Text style={styles.authHeaderSub}>Tactical Engine</Text>
-              <Text style={styles.authHeaderTitle}>{authMode === 'signin' ? 'Sign In' : 'Create Account'}</Text>
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.authContainer} edges={['top', 'bottom']}>
+          <StatusBar barStyle="light-content" backgroundColor="#0B0E14" />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
+              <View style={styles.authBox}>
+                <Text style={styles.authHeaderSub}>Tactical Engine</Text>
+                <Text style={styles.authHeaderTitle}>{authMode === 'signin' ? 'Sign In' : 'Create Account'}</Text>
 
-              {authMessage.text ? (
-                <Text style={authMessage.type === 'error' ? styles.errorText : styles.successText}>
-                  {authMessage.text}
-                </Text>
-              ) : null}
+                {authMessage.text ? (
+                  <Text style={authMessage.type === 'error' ? styles.errorText : styles.successText}>
+                    {authMessage.text}
+                  </Text>
+                ) : null}
 
-              {authMode === 'signup' && (
-                <>
-                  <Text style={styles.inputLabel}>Full Name:</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="e.g. Pep Guardiola"
-                    placeholderTextColor="#64748b"
-                    value={fullName}
-                    onChangeText={setFullName}
-                    autoCapitalize="words"
-                  />
-                </>
-              )}
+                {authMode === 'signup' && (
+                  <>
+                    <Text style={styles.inputLabel}>Full Name:</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="e.g. Pep Guardiola"
+                      placeholderTextColor="#64748b"
+                      value={fullName}
+                      onChangeText={setFullName}
+                      autoCapitalize="words"
+                    />
+                  </>
+                )}
 
-              <Text style={styles.inputLabel}>Email Address:</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="coach@example.com"
-                placeholderTextColor="#64748b"
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-              />
+                <Text style={styles.inputLabel}>Email Address:</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="coach@example.com"
+                  placeholderTextColor="#64748b"
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
 
-              <Text style={styles.inputLabel}>Password:</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="********"
-                placeholderTextColor="#64748b"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-              />
+                <Text style={styles.inputLabel}>Password:</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="********"
+                  placeholderTextColor="#64748b"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                />
 
-              <TouchableOpacity style={styles.primaryAuthBtn} onPress={handleAuth}>
-                <Text style={styles.primaryAuthBtnText}>
-                  {authMode === 'signin' ? 'Sign In' : 'Sign Up'}
-                </Text>
-              </TouchableOpacity>
+                <TouchableOpacity style={styles.primaryAuthBtn} onPress={handleAuth}>
+                  <Text style={styles.primaryAuthBtnText}>
+                    {authMode === 'signin' ? 'Sign In' : 'Sign Up'}
+                  </Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={{ marginTop: 20 }} 
-                onPress={() => {
-                  setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
-                  setAuthMessage({ text: '', type: '' });
-                }}
-              >
-                <Text style={styles.switchAuthText}>
-                  {authMode === 'signin' ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+                <TouchableOpacity 
+                  style={{ marginTop: 20 }} 
+                  onPress={() => {
+                    setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
+                    setAuthMessage({ text: '', type: '' });
+                  }}
+                >
+                  <Text style={styles.switchAuthText}>
+                    {authMode === 'signin' ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
   if (session && profile && !profile.role_configured) {
     return (
-      <SafeAreaView style={styles.authContainer}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
-            <View style={styles.authBox}>
-              <Text style={styles.authHeaderSub}>Welcome to Tactical Engine</Text>
-              <Text style={styles.authHeaderTitle}>Select Your Role</Text>
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.authContainer} edges={['top', 'bottom']}>
+          <StatusBar barStyle="light-content" backgroundColor="#0B0E14" />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
+              <View style={styles.authBox}>
+                <Text style={styles.authHeaderSub}>Welcome to Tactical Engine</Text>
+                <Text style={styles.authHeaderTitle}>Select Your Role</Text>
 
-              {onboardingStep === 'choose_path' && (
-                <>
-                  <TouchableOpacity style={styles.wizardOptionBtn} onPress={() => setOnboardingStep('role_selection')}>
-                    <Text style={styles.wizardOptionTitle}>⚽ Create New Team (Head Coach / Staff)</Text>
-                    <Text style={styles.wizardOptionSub}>Start a new team, manage tactics, and generate join codes for your staff and parents.</Text>
-                  </TouchableOpacity>
+                {onboardingStep === 'choose_path' && (
+                  <>
+                    <TouchableOpacity style={styles.wizardOptionBtn} onPress={() => setOnboardingStep('role_selection')}>
+                      <Text style={styles.wizardOptionTitle}>⚽ Create New Team (Head Coach / Staff)</Text>
+                      <Text style={styles.wizardOptionSub}>Start a new team, manage tactics, and generate join codes for your staff and parents.</Text>
+                    </TouchableOpacity>
 
-                  <TouchableOpacity style={[styles.wizardOptionBtn, { borderColor: '#3b82f6' }]} onPress={() => setOnboardingStep('parent_notice')}>
-                    <Text style={[styles.wizardOptionTitle, { color: '#3b82f6' }]}>🔑 Join Existing Team</Text>
-                    <Text style={styles.wizardOptionSub}>Enter a Join Code provided by your Head Coach.</Text>
-                  </TouchableOpacity>
-                </>
-              )}
+                    <TouchableOpacity style={[styles.wizardOptionBtn, { borderColor: '#3b82f6' }]} onPress={() => setOnboardingStep('parent_notice')}>
+                      <Text style={[styles.wizardOptionTitle, { color: '#3b82f6' }]}>🔑 Join Existing Team</Text>
+                      <Text style={styles.wizardOptionSub}>Enter a Join Code provided by your Head Coach.</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
 
-              {onboardingStep === 'role_selection' && (
-                <>
-                  <Text style={[styles.inputLabel, { marginBottom: 10, textAlign: 'center' }]}>What is your role on this team?</Text>
-                  
-                  <TouchableOpacity style={[styles.wizardOptionBtn, selectedCreationRole === 'coach' && { borderColor: '#39FF14' }]} onPress={() => setSelectedCreationRole('coach')}>
-                    <Text style={styles.wizardOptionTitle}>👑 Head Coach</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.wizardOptionBtn, selectedCreationRole === 'assistant' && { borderColor: '#39FF14' }]} onPress={() => setSelectedCreationRole('assistant')}>
-                    <Text style={styles.wizardOptionTitle}>⚽ Assistant Coach</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.wizardOptionBtn, selectedCreationRole === 'admin' && { borderColor: '#39FF14' }]} onPress={() => setSelectedCreationRole('admin')}>
-                    <Text style={styles.wizardOptionTitle}>📋 Team Administrator</Text>
-                  </TouchableOpacity>
+                {onboardingStep === 'role_selection' && (
+                  <>
+                    <Text style={[styles.inputLabel, { marginBottom: 10, textAlign: 'center' }]}>What is your role on this team?</Text>
+                    
+                    <TouchableOpacity style={[styles.wizardOptionBtn, selectedCreationRole === 'coach' && { borderColor: '#39FF14' }]} onPress={() => setSelectedCreationRole('coach')}>
+                      <Text style={styles.wizardOptionTitle}>👑 Head Coach</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.wizardOptionBtn, selectedCreationRole === 'assistant' && { borderColor: '#39FF14' }]} onPress={() => setSelectedCreationRole('assistant')}>
+                      <Text style={styles.wizardOptionTitle}>⚽ Assistant Coach</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.wizardOptionBtn, selectedCreationRole === 'admin' && { borderColor: '#39FF14' }]} onPress={() => setSelectedCreationRole('admin')}>
+                      <Text style={styles.wizardOptionTitle}>📋 Team Administrator</Text>
+                    </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.primaryAuthBtn} onPress={() => setOnboardingStep('coach_setup')}>
-                    <Text style={styles.primaryAuthBtnText}>Continue to Team Setup ➔</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={{ marginTop: 15 }} onPress={() => setOnboardingStep('choose_path')}>
-                    <Text style={styles.switchAuthText}>← Back</Text>
-                  </TouchableOpacity>
-                </>
-              )}
+                    <TouchableOpacity style={styles.primaryAuthBtn} onPress={() => setOnboardingStep('coach_setup')}>
+                      <Text style={styles.primaryAuthBtnText}>Continue to Team Setup ➔</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={{ marginTop: 15 }} onPress={() => setOnboardingStep('choose_path')}>
+                      <Text style={styles.switchAuthText}>← Back</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
 
-              {onboardingStep === 'coach_setup' && (
-                <>
-                  <Text style={styles.inputLabel}>Team Name:</Text>
-                  <TextInput style={styles.input} placeholder="e.g. Marlborough Youth FC" placeholderTextColor="#64748b" value={teamName} onChangeText={setTeamName} />
+                {onboardingStep === 'coach_setup' && (
+                  <>
+                    <Text style={styles.inputLabel}>Team Name:</Text>
+                    <TextInput style={styles.input} placeholder="e.g. Marlborough Youth FC" placeholderTextColor="#64748b" value={teamName} onChangeText={setTeamName} />
 
-                  <Text style={styles.inputLabel}>Age Group:</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 15 }}>
-                    {ageGroupOptions.map((age) => (
-                      <TouchableOpacity key={age} style={[styles.fmtBtn, teamAgeGroup === age && styles.fmtBtnActive]} onPress={() => setTeamAgeGroup(age)}>
-                        <Text style={[styles.fmtBtnText, teamAgeGroup === age && styles.fmtBtnTextActive]}>{age}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+                    <Text style={styles.inputLabel}>Age Group:</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 15 }}>
+                      {ageGroupOptions.map((age) => (
+                        <TouchableOpacity key={age} style={[styles.fmtBtn, teamAgeGroup === age && styles.fmtBtnActive]} onPress={() => setTeamAgeGroup(age)}>
+                          <Text style={[styles.fmtBtnText, teamAgeGroup === age && styles.fmtBtnTextActive]}>{age}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
 
-                  <TouchableOpacity style={styles.primaryAuthBtn} onPress={createTeamFlow}>
-                    <Text style={styles.primaryAuthBtnText}>Create Team & Enter App</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={{ marginTop: 15 }} onPress={() => setOnboardingStep('role_selection')}>
-                    <Text style={styles.switchAuthText}>← Back to Role</Text>
-                  </TouchableOpacity>
-                </>
-              )}
+                    <TouchableOpacity style={styles.primaryAuthBtn} onPress={createTeamFlow}>
+                      <Text style={styles.primaryAuthBtnText}>Create Team & Enter App</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={{ marginTop: 15 }} onPress={() => setOnboardingStep('role_selection')}>
+                      <Text style={styles.switchAuthText}>← Back to Role</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
 
-              {onboardingStep === 'parent_notice' && (
-                <>
-                  <View style={{ backgroundColor: '#0B0E14', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#3b82f6', marginBottom: 15 }}>
-                    <Text style={{ color: '#ffffff', fontSize: 13, lineHeight: 18, textAlign: 'center' }}>
-                      📢 <Text style={{ fontWeight: 'bold', color: '#3b82f6' }}>Notice:</Text> Enter the code provided by your Head Coach.
-                    </Text>
-                  </View>
+                {onboardingStep === 'parent_notice' && (
+                  <>
+                    <View style={{ backgroundColor: '#0B0E14', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#3b82f6', marginBottom: 15 }}>
+                      <Text style={{ color: '#ffffff', fontSize: 13, lineHeight: 18, textAlign: 'center' }}>
+                        📢 <Text style={{ fontWeight: 'bold', color: '#3b82f6' }}>Notice:</Text> Enter the code provided by your Head Coach.
+                      </Text>
+                    </View>
 
-                  <Text style={styles.inputLabel}>Join Code:</Text>
-                  <TextInput style={[styles.input, familyCodeInput ? { borderColor: '#39FF14', color: '#39FF14', fontWeight: 'bold' } : null]} placeholder="e.g. STAF-1234, ADMN-1234, or FAM-1234" placeholderTextColor="#64748b" value={familyCodeInput} onChangeText={setFamilyCodeInput} autoCapitalize="characters" />
+                    <Text style={styles.inputLabel}>Join Code:</Text>
+                    <TextInput style={[styles.input, familyCodeInput ? { borderColor: '#39FF14', color: '#39FF14', fontWeight: 'bold' } : null]} placeholder="e.g. STAF-1234, ADMN-1234, or FAM-1234" placeholderTextColor="#64748b" value={familyCodeInput} onChangeText={setFamilyCodeInput} autoCapitalize="characters" />
 
-                  <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#3b82f6' }]} onPress={linkChildFlow}>
-                    <Text style={[styles.primaryAuthBtnText, { color: '#ffffff' }]}>Link Account & Continue</Text>
-                  </TouchableOpacity>
+                    <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#3b82f6' }]} onPress={linkChildFlow}>
+                      <Text style={[styles.primaryAuthBtnText, { color: '#ffffff' }]}>Link Account & Continue</Text>
+                    </TouchableOpacity>
 
-                  <TouchableOpacity style={{ marginTop: 15 }} onPress={() => setOnboardingStep('choose_path')}>
-                    <Text style={styles.switchAuthText}>← Back to Selection</Text>
-                  </TouchableOpacity>
-                </>
-              )}
+                    <TouchableOpacity style={{ marginTop: 15 }} onPress={() => setOnboardingStep('choose_path')}>
+                      <Text style={styles.switchAuthText}>← Back to Selection</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
 
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      
-      {/* TOP HEADER BAR */}
-      <View style={styles.masterToggleBar}>
-        <TouchableOpacity style={styles.menuTriggerBtn} onPress={() => setIsSidebarOpen(true)}>
-          <Text style={styles.menuTriggerIcon}>☰</Text>
-        </TouchableOpacity>
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
+        <StatusBar barStyle="light-content" backgroundColor="#0B0E14" translucent={false} />
+        
+        {/* TOP HEADER BAR WITH DYNAMIC CONTEXTUAL ROLE SELECTOR */}
+        <View style={styles.masterToggleBar}>
+          <TouchableOpacity style={styles.menuTriggerBtn} onPress={() => setIsSidebarOpen(true)}>
+            <Text style={styles.menuTriggerIcon}>☰</Text>
+          </TouchableOpacity>
 
-        {isSuperUser ? (
           <View style={styles.toggleCenterGroup}>
-            <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'coach' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('coach')}>
-              <Text style={[styles.masterToggleBtnText, appMode === 'coach' && styles.masterToggleBtnTextActive]}>COACH</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'parent' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('parent')}>
-              <Text style={[styles.masterToggleBtnText, appMode === 'parent' && styles.masterToggleBtnTextActive]}>
-                {isAdultTeam ? 'FAN' : 'PARENT'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.masterToggleBtn, appMode === 'player' && styles.masterToggleBtnActive]} onPress={() => handleModeSwitch('player')}>
-              <Text style={[styles.masterToggleBtnText, appMode === 'player' && styles.masterToggleBtnTextActive]}>PLAYER</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={{ alignItems: 'center' }}>
-            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 14 }}>
-              {activeTeamObj?.name || 'Tactical Engine'}
-            </Text>
-            <Text style={{ color: '#39FF14', fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase' }}>
-              {profile?.role === 'coach' ? 'Head Coach' : profile?.role === 'assistant' ? 'Assistant Coach' : profile?.role === 'admin' ? 'Team Admin' : profile?.role === 'parent' ? (isAdultTeam ? 'Fan View' : 'Parent View') : 'Player View'}
-            </Text>
-          </View>
-        )}
-
-        <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
-          <Text style={styles.signOutBtnText}>Log Out</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* MULTI-TEAM HORIZONTAL SELECTOR BAR */}
-      {appMode === 'coach' && myTeams.length > 0 && (
-        <View style={styles.teamSelectorBar}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {myTeams.map(t => (
+            {isStaffForActiveTeam && (
               <TouchableOpacity 
-                key={t.id} 
-                style={[styles.teamTab, activeTeamId === t.id && styles.teamTabActive]}
-                onPress={() => {
-                  setActiveTeamId(t.id);
-                  const ageGrp = t.age_group || 'U16';
-                  setTeamAgeGroup(ageGrp);
-
-                  const is9v9 = ['U13'].includes(String(ageGrp).toUpperCase());
-                  setActiveFormation(t.default_formation || (is9v9 ? '3-3-2' : '4-2-3-1'));
-                }}
+                style={[styles.masterToggleBtn, appMode === 'coach' && styles.masterToggleBtnActive]} 
+                onPress={() => handleModeSwitch('coach')}
               >
-                <Text style={[styles.teamTabText, activeTeamId === t.id && styles.teamTabTextActive]}>
-                  {t.name} ({t.age_group || 'U16'})
+                <Text style={[styles.masterToggleBtnText, appMode === 'coach' && styles.masterToggleBtnTextActive]}>
+                  COACH
                 </Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+            )}
 
-      {/* SCREEN ROUTER VIEWER */}
-      <View style={styles.screenViewer}>
-
-        {(currentTab === 'player' || currentTab === 'profiles') && appMode !== 'coach' && (
-          <PlayerProfileScreen
-            myLinkedPlayers={myLinkedPlayers}
-            teamSheet={teamSheet}
-            activePlayerId={activePlayerId}
-            setActivePlayerId={setActivePlayerId}
-            activeFormation={activeFormation}
-            appMode={appMode}
-            teamAgeGroup={effectiveAgeGroup}
-            playerTab={playerTab}
-            setPlayerTab={setPlayerTab}
-            matchHistory={matchHistory}
-            setIsMatchArchiveOpen={setIsMatchArchiveOpen}
-            liveTicker={liveTicker}
-            fetchLiveTicker={fetchLiveTicker}
-            activeTeamId={activeTeamId}
-            matchPhase={matchPhase}
-            hasVotedMotm={hasVotedMotm}
-            votedPlayerName={votedPlayerName}
-            setLiveEventMode={setLiveEventMode}
-            scoutNotesInput={scoutNotesInput}
-            activePlayer={activePlayer}
-            shareFanInvite={shareFanInvite}
-            shareCoParentInvite={shareCoParentInvite}
-            hasSecondaryRole={hasSecondaryRole}
-            viewingRoleToggle={viewingRoleToggle}
-            setViewingRoleToggle={setViewingRoleToggle}
-            isGroupedRole={isGroupedRole}
-            subRoleOptions={subRoleOptions}
-            activeSubRole={activeSubRole}
-            setActiveSubRole={setActiveSubRole}
-            setQuizState={setQuizState}
-            setCurrentQuizIdx={setCurrentQuizIdx}
-            activeTactics={activeTactics}
-            currentQuizIdx={currentQuizIdx}
-            currentQuizList={currentQuizList}
-            currentQuiz={currentQuiz}
-            handleQuizAnswer={handleQuizAnswer}
-            quizState={quizState}
-            handleNextQuestion={handleNextQuestion}
-            handleRestartQuiz={handleRestartQuiz}
-            renderProfileStatBar={renderProfileStatBar}
-            toggleRSVP={toggleRSVP}
-            setIsFaWebviewOpen={setIsFaWebviewOpen}
-            faLeagueUrl={faLeagueUrl}
-          />
-        )}
-
-        {currentTab === 'profiles' && appMode === 'coach' && (
-          <View style={{ flex: 1 }}>
-            <View style={styles.headerRow}>
-              <View>
-                <Text style={styles.headerSub}>Development Center</Text>
-                <Text style={styles.headerTitle}>Player Profiles</Text>
-              </View>
-              <TouchableOpacity style={styles.addPlayerBtn} onPress={() => setIsAddPlayerModalOpen(true)}>
-                <Text style={styles.addPlayerBtnText}>➕ Add Player</Text>
+            {(isParentForActiveTeam || !isStaffForActiveTeam || isSuperUser) && (
+              <TouchableOpacity 
+                style={[styles.masterToggleBtn, (appMode === 'parent' || appMode === 'fan') && styles.masterToggleBtnActive]} 
+                onPress={() => handleModeSwitch('parent')}
+              >
+                <Text style={[styles.masterToggleBtnText, (appMode === 'parent' || appMode === 'fan') && styles.masterToggleBtnTextActive]}>
+                  {isAdultTeam ? 'FAN' : 'PARENT'}
+                </Text>
               </TouchableOpacity>
-            </View>
+            )}
 
-            <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
-              {(teamSheet || []).map(p => p && (
-                <TouchableOpacity key={p.id} style={styles.card} onPress={() => setEditingPlayer(p)}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <Text style={[styles.roleTitle, { flex: 1, marginRight: 10 }]} numberOfLines={1}>
-                      #{p.squad_number || '0'} {p.name}
-                    </Text>
-                    <View style={styles.editProfileBtn}>
-                      <Text style={styles.editProfileBtnText}>Edit Profile</Text>
-                    </View>
-                  </View>
+            {(isParentForActiveTeam || isSuperUser) && (
+              <TouchableOpacity 
+                style={[styles.masterToggleBtn, appMode === 'player' && styles.masterToggleBtnActive]} 
+                onPress={() => handleModeSwitch('player')}
+              >
+                <Text style={[styles.masterToggleBtnText, appMode === 'player' && styles.masterToggleBtnTextActive]}>
+                  PLAYER
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
-                  <View style={{ backgroundColor: '#0B0E14', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44' }}>
-                    <Text style={[styles.roleSubTitle, { marginBottom: 4 }]}>
-                      Primary: <Text style={{ color: '#39FF14' }}>{p.position || 'TBD'}</Text> | Secondary: <Text style={{ color: '#3b82f6' }}>{p.secondary_position || 'None'}</Text>
-                    </Text>
-                    
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
-                      <Text style={{ color: '#cbd5e1', fontSize: 11 }}>
-                        Apps: <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>{p.apps || 0}</Text> | Mins: <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>{p.total_minutes_played || 0}'</Text>
-                      </Text>
-                      <Text style={{ color: '#cbd5e1', fontSize: 11 }}>
-                        Goals: <Text style={{ color: '#39FF14', fontWeight: 'bold' }}>{p.goals || 0}</Text> | Assists: <Text style={{ color: '#3b82f6', fontWeight: 'bold' }}>{p.assists || 0}</Text>
-                      </Text>
-                    </View>
-                  </View>
+          <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
+            <Text style={styles.signOutBtnText}>Log Out</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 🌐 UNIVERSAL MULTI-TEAM SELECTOR BAR */}
+        {(myTeams.length > 1 || (appMode === 'coach' && myTeams.length > 0)) && (
+          <View style={styles.teamSelectorBar}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {myTeams.map(t => (
+                <TouchableOpacity 
+                  key={t.id} 
+                  style={[styles.teamTab, activeTeamId === t.id && styles.teamTabActive]}
+                  onPress={() => {
+                    setActiveTeamId(t.id);
+                    const ageGrp = t.age_group || 'U16';
+                    setTeamAgeGroup(ageGrp);
+
+                    const is9v9 = ['U13'].includes(String(ageGrp).toUpperCase());
+                    setActiveFormation(t.default_formation || (is9v9 ? '3-3-2' : '4-2-3-1'));
+
+                    const staffOnNew = isSuperUser || t.created_by === session?.user?.id || userStaffLinks.some(s => s.team_id === t.id);
+                    if (!staffOnNew && appMode === 'coach') {
+                      setAppMode('parent');
+                      setCurrentTab('player');
+                    }
+                  }}
+                >
+                  <Text style={[styles.teamTabText, activeTeamId === t.id && styles.teamTabTextActive]}>
+                    {t.name} ({t.age_group || 'U16'})
+                  </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
         )}
 
-        {currentTab === 'coachHub' && (
-          <CoachHubScreen
-            matchHistory={matchHistory}
-            setIsMatchArchiveOpen={setIsMatchArchiveOpen}
-            isRsvpListExpanded={isRsvpListExpanded}
-            setIsRsvpListExpanded={setIsRsvpListExpanded}
-            teamSheet={teamSheet}
-            toggleRSVP={toggleRSVP}
-            selectedGameState={selectedGameState}
-            setSelectedGameState={setSelectedGameState}
-            gameStateTactics={gameStateTactics}
-            myLinkedPlayers={myLinkedPlayers}
-            myChildId={myChildId}
-            setMyChildId={setMyChildId}
-            myChild={myChild}
-            shareCoParentInvite={shareCoParentInvite}
-          />
-        )}
+        {/* SCREEN ROUTER VIEWER */}
+        <View style={styles.screenViewer}>
 
-        {currentTab === 'liveMatch' && (
-          <LiveMatchScreen
-            appMode={appMode}
-            handlePhaseChange={handlePhaseChange}
-            getPhaseButtonText={getPhaseButtonText}
-            activeTeamObj={activeTeamObj}
-            initGoalFlow={initGoalFlow}
-            initCardFlow={initCardFlow}
-            onPitchPlayers={onPitchPlayers}
-            subs={subs}
-            openHalfTimeSubModal={() => setIsHalfTimeSubModalOpen(true)}
-          />
-        )}
+          {(currentTab === 'player' || currentTab === 'profiles') && appMode !== 'coach' && (
+            <PlayerProfileScreen
+              myLinkedPlayers={myLinkedPlayers}
+              teamSheet={teamSheet}
+              activePlayerId={activePlayerId}
+              setActivePlayerId={setActivePlayerId}
+              activeFormation={activeFormation}
+              appMode={appMode}
+              teamAgeGroup={effectiveAgeGroup}
+              playerTab={playerTab}
+              setPlayerTab={setPlayerTab}
+              matchHistory={matchHistory}
+              setIsMatchArchiveOpen={setIsMatchArchiveOpen}
+              liveTicker={liveTicker}
+              fetchLiveTicker={fetchLiveTicker}
+              activeTeamId={activeTeamId}
+              matchPhase={matchPhase}
+              hasVotedMotm={hasVotedMotm}
+              votedPlayerName={votedPlayerName}
+              setLiveEventMode={setLiveEventMode}
+              scoutNotesInput={scoutNotesInput}
+              activePlayer={activePlayer}
+              shareFanInvite={shareFanInvite}
+              shareCoParentInvite={shareCoParentInvite}
+              hasSecondaryRole={hasSecondaryRole}
+              viewingRoleToggle={viewingRoleToggle}
+              setViewingRoleToggle={setViewingRoleToggle}
+              isGroupedRole={isGroupedRole}
+              subRoleOptions={subRoleOptions}
+              activeSubRole={activeSubRole}
+              setActiveSubRole={setActiveSubRole}
+              setQuizState={setQuizState}
+              setCurrentQuizIdx={setCurrentQuizIdx}
+              activeTactics={activeTactics}
+              currentQuizIdx={currentQuizIdx}
+              currentQuizList={currentQuizList}
+              currentQuiz={currentQuiz}
+              handleQuizAnswer={handleQuizAnswer}
+              quizState={quizState}
+              handleNextQuestion={handleNextQuestion}
+              handleRestartQuiz={handleRestartQuiz}
+              renderProfileStatBar={renderProfileStatBar}
+              toggleRSVP={toggleRSVP}
+              setIsFaWebviewOpen={setIsFaWebviewOpen}
+              faLeagueUrl={faLeagueUrl}
+            />
+          )}
 
-        {currentTab === 'lineup' && (
-          <LineupScreen
-            activeFormation={activeFormation}
-            appMode={appMode}
-            lineupViewMode={lineupViewMode}
-            setLineupViewMode={setLineupViewMode}
-            setIsFormationModalOpen={setIsFormationModalOpen}
-            isTafeDisabled={isTafeDisabled}
-            openTafeModal={openTafeModal}
-            isLoadingSheet={isLoadingSheet}
-            squadDepthFilter={squadDepthFilter}
-            setSquadDepthFilter={setSquadDepthFilter}
-            activeLayout={activeLayout}
-            renderDepthPosition={renderDepthPosition}
-            renderPosition={renderPosition}
-            subs={subs}
-            setLineupAssignPlayer={setLineupAssignPlayer}
-            getFootednessString={getFootednessString}
-            teamSheet={teamSheet}
-            setTeamSheet={setTeamSheet}
-            currentAvailablePositions={currentAvailablePositions}
-          />
-        )}
+          {currentTab === 'profiles' && appMode === 'coach' && (
+            <View style={{ flex: 1 }}>
+              <View style={styles.headerRow}>
+                <View>
+                  <Text style={styles.headerSub}>Development Center</Text>
+                  <Text style={styles.headerTitle}>Player Profiles</Text>
+                </View>
+                <TouchableOpacity style={styles.addPlayerBtn} onPress={() => setIsAddPlayerModalOpen(true)}>
+                  <Text style={styles.addPlayerBtnText}>➕ Add Player</Text>
+                </TouchableOpacity>
+              </View>
 
-        {currentTab === 'teamSheet' && (
-          <TeamSheetScreen
-            profile={profile}
-            appMode={appMode}
-            gkPlayers={gkPlayers}
-            outfieldPlayers={outfieldPlayers}
-            adjustMatchStat={adjustMatchStat}
-          />
-        )}
+              <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
+                {(teamSheet || []).map(p => p && (
+                  <TouchableOpacity key={p.id} style={styles.card} onPress={() => setEditingPlayer(p)}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <Text style={[styles.roleTitle, { flex: 1, marginRight: 10 }]} numberOfLines={1}>
+                        #{p.squad_number || '0'} {p.name}
+                      </Text>
+                      <View style={styles.editProfileBtn}>
+                        <Text style={styles.editProfileBtnText}>Edit Profile</Text>
+                      </View>
+                    </View>
 
-        {currentTab === 'training' && (
-          <TrainingScreen
-            activeTeamId={activeTeamId}
-            isTrainingRegisterExpanded={isTrainingRegisterExpanded}
-            setIsTrainingRegisterExpanded={setIsTrainingRegisterExpanded}
-            teamSheet={teamSheet}
-            trainingRegister={trainingRegister}
-            setTrainingRegister={setTrainingRegister}
-            submitTrainingSession={submitTrainingSession}
-            selectedWeek={selectedWeek}
-            setSelectedWeek={setSelectedWeek}
-            activeWeekData={activeWeekData}
-            openDrillVideo={openDrillVideo}
-          />
-        )}
+                    <View style={{ backgroundColor: '#0B0E14', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44' }}>
+                      <Text style={[styles.roleSubTitle, { marginBottom: 4 }]}>
+                        Primary: <Text style={{ color: '#39FF14' }}>{p.position || 'TBD'}</Text> | Secondary: <Text style={{ color: '#3b82f6' }}>{p.secondary_position || 'None'}</Text>
+                      </Text>
+                      
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+                        <Text style={{ color: '#cbd5e1', fontSize: 11 }}>
+                          Apps: <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>{p.apps || 0}</Text> | Mins: <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>{p.total_minutes_played || 0}'</Text>
+                        </Text>
+                        <Text style={{ color: '#cbd5e1', fontSize: 11 }}>
+                          Goals: <Text style={{ color: '#39FF14', fontWeight: 'bold' }}>{p.goals || 0}</Text> | Assists: <Text style={{ color: '#3b82f6', fontWeight: 'bold' }}>{p.assists || 0}</Text>
+                        </Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
 
-        {currentTab === 'customTraining' && (
-          <CustomTrainingScreen
-            activeTeamId={activeTeamId}
-            setDrillSelectorMode={setDrillSelectorMode}
-            selectedWarmup={selectedWarmup}
-            selectedDrill1={selectedDrill1}
-            selectedDrill2={selectedDrill2}
-            selectedSSG={selectedSSG}
-            openDrillVideo={openDrillVideo}
-          />
-        )}
+          {currentTab === 'coachHub' && (
+            <CoachHubScreen
+              matchHistory={matchHistory}
+              setIsMatchArchiveOpen={setIsMatchArchiveOpen}
+              isRsvpListExpanded={isRsvpListExpanded}
+              setIsRsvpListExpanded={setIsRsvpListExpanded}
+              teamSheet={teamSheet}
+              toggleRSVP={toggleRSVP}
+              batchToggleRSVP={batchToggleRSVP}
+              selectedGameState={selectedGameState}
+              setSelectedGameState={setSelectedGameState}
+              gameStateTactics={gameStateTactics}
+              myLinkedPlayers={myLinkedPlayers}
+              myChildId={myChildId}
+              setMyChildId={setMyChildId}
+              myChild={myChild}
+              shareCoParentInvite={shareCoParentInvite}
+            />
+          )}
 
-      </View>
+          {currentTab === 'liveMatch' && (
+            <LiveMatchScreen
+              appMode={appMode}
+              handlePhaseChange={handlePhaseChange}
+              getPhaseButtonText={getPhaseButtonText}
+              activeTeamObj={activeTeamObj}
+              initGoalFlow={initGoalFlow}
+              initCardFlow={initCardFlow}
+              onPitchPlayers={onPitchPlayers}
+              subs={subs}
+              openHalfTimeSubModal={() => setIsHalfTimeSubModalOpen(true)}
+            />
+          )}
 
-      {/* BOTTOM NAVIGATION */}
-      <View style={styles.bottomNav}>
-        {(appMode === 'player' || appMode === 'parent') && (
-          <>
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('player')}>
-              <Text style={[styles.navIcon, currentTab === 'player' && styles.activeNav]}>⚽</Text>
-              <Text style={[styles.navText, currentTab === 'player' && styles.activeNav]}>
-                {(appMode === 'parent' && isAdultTeam) ? 'Match Hub' : 'My Profile'}
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('lineup')}>
-              <Text style={[styles.navIcon, currentTab === 'lineup' && styles.activeNav]}>🛡</Text>
-              <Text style={[styles.navText, currentTab === 'lineup' && styles.activeNav]}>Lineup</Text>
-            </TouchableOpacity>
+          {currentTab === 'lineup' && (
+            <LineupScreen
+              activeFormation={activeFormation}
+              appMode={appMode}
+              lineupViewMode={lineupViewMode}
+              setLineupViewMode={setLineupViewMode}
+              setIsFormationModalOpen={setIsFormationModalOpen}
+              isTafeDisabled={isTafeDisabled}
+              openTafeModal={openTafeModal}
+              isLoadingSheet={isLoadingSheet}
+              squadDepthFilter={squadDepthFilter}
+              setSquadDepthFilter={setSquadDepthFilter}
+              activeLayout={activeLayout}
+              renderDepthPosition={renderDepthPosition}
+              renderPosition={renderPosition}
+              subs={subs}
+              setLineupAssignPlayer={setLineupAssignPlayer}
+              getFootednessString={getFootednessString}
+              teamSheet={teamSheet}
+              setTeamSheet={setTeamSheet}
+              currentAvailablePositions={currentAvailablePositions}
+            />
+          )}
 
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('teamSheet')}>
-              <Text style={[styles.navIcon, currentTab === 'teamSheet' && styles.activeNav]}>📊</Text>
-              <Text style={[styles.navText, currentTab === 'teamSheet' && styles.activeNav]}>Stats</Text>
-            </TouchableOpacity>
-          </>
-        )}
+          {currentTab === 'teamSheet' && (
+            <TeamSheetScreen
+              profile={profile}
+              appMode={appMode}
+              gkPlayers={gkPlayers}
+              outfieldPlayers={outfieldPlayers}
+              adjustMatchStat={adjustMatchStat}
+            />
+          )}
 
-        {appMode === 'coach' && (
-          <>
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('profiles')}>
-              <Text style={[styles.navIcon, currentTab === 'profiles' && styles.activeNav]}>👤</Text>
-              <Text style={[styles.navText, currentTab === 'profiles' && styles.activeNav]}>Profiles</Text>
-            </TouchableOpacity>
+          {currentTab === 'training' && (
+            <TrainingScreen
+              activeTeamId={activeTeamId}
+              isTrainingRegisterExpanded={isTrainingRegisterExpanded}
+              setIsTrainingRegisterExpanded={setIsTrainingRegisterExpanded}
+              teamSheet={teamSheet}
+              trainingRegister={trainingRegister}
+              setTrainingRegister={setTrainingRegister}
+              submitTrainingSession={submitTrainingSession}
+              selectedWeek={selectedWeek}
+              setSelectedWeek={setSelectedWeek}
+              activeWeekData={activeWeekData}
+              openDrillVideo={openDrillVideo}
+            />
+          )}
 
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('coachHub')}>
-              <Text style={[styles.navIcon, currentTab === 'coachHub' && styles.activeNav]}>📋</Text>
-              <Text style={[styles.navText, currentTab === 'coachHub' && styles.activeNav]}>Hub</Text>
-            </TouchableOpacity>
+          {currentTab === 'customTraining' && (
+            <CustomTrainingScreen
+              activeTeamId={activeTeamId}
+              setDrillSelectorMode={setDrillSelectorMode}
+              selectedWarmup={selectedWarmup}
+              selectedDrill1={selectedDrill1}
+              selectedDrill2={selectedDrill2}
+              selectedSSG={selectedSSG}
+              openDrillVideo={openDrillVideo}
+            />
+          )}
 
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('liveMatch')}>
-              <Text style={[styles.navIcon, currentTab === 'liveMatch' && styles.activeNav]}>⏱️</Text>
-              <Text style={[styles.navText, currentTab === 'liveMatch' && styles.activeNav]}>Live</Text>
-            </TouchableOpacity>
+        </View>
 
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('lineup')}>
-              <Text style={[styles.navIcon, currentTab === 'lineup' && styles.activeNav]}>🛡️</Text>
-              <Text style={[styles.navText, currentTab === 'lineup' && styles.activeNav]}>Lineup</Text>
-            </TouchableOpacity>
+        {/* BOTTOM NAVIGATION WITH ANDROID SYSTEM BAR PADDING */}
+        <View style={styles.bottomNav}>
+          {(appMode === 'player' || appMode === 'parent') && (
+            <>
+              <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('player')}>
+                <Text style={[styles.navIcon, currentTab === 'player' && styles.activeNav]}>⚽</Text>
+                <Text style={[styles.navText, currentTab === 'player' && styles.activeNav]}>
+                  {(appMode === 'parent' && isAdultTeam) ? 'Match Hub' : 'My Profile'}
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('lineup')}>
+                <Text style={[styles.navIcon, currentTab === 'lineup' && styles.activeNav]}>🛡</Text>
+                <Text style={[styles.navText, currentTab === 'lineup' && styles.activeNav]}>Lineup</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('teamSheet')}>
-              <Text style={[styles.navIcon, currentTab === 'teamSheet' && styles.activeNav]}>📊</Text>
-              <Text style={[styles.navText, currentTab === 'teamSheet' && styles.activeNav]}>Stats</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
+              <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('teamSheet')}>
+                <Text style={[styles.navIcon, currentTab === 'teamSheet' && styles.activeNav]}>📊</Text>
+                <Text style={[styles.navText, currentTab === 'teamSheet' && styles.activeNav]}>Stats</Text>
+              </TouchableOpacity>
+            </>
+          )}
 
-      {/* 📁 EXECUTIVE SEASON VAULT MODAL */}
-      <Modal visible={isSeasonArchiveOpen} transparent={true} animationType="slide">
-        <View style={styles.modalOverlayFull}>
-          <SafeAreaView style={{ flex: 1, width: '100%' }}>
-            
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#2E3A44', backgroundColor: '#0B0E14' }}>
-              <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>📁 Season Vault Archive</Text>
-              <TouchableOpacity onPress={() => { setViewingSeasonReport(null); setIsSeasonArchiveOpen(false); }} style={{ backgroundColor: '#1A1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 }}>
+          {appMode === 'coach' && (
+            <>
+              <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('profiles')}>
+                <Text style={[styles.navIcon, currentTab === 'profiles' && styles.activeNav]}>👤</Text>
+                <Text style={[styles.navText, currentTab === 'profiles' && styles.activeNav]}>Profiles</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('coachHub')}>
+                <Text style={[styles.navIcon, currentTab === 'coachHub' && styles.activeNav]}>📋</Text>
+                <Text style={[styles.navText, currentTab === 'coachHub' && styles.activeNav]}>Hub</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('liveMatch')}>
+                <Text style={[styles.navIcon, currentTab === 'liveMatch' && styles.activeNav]}>⏱️</Text>
+                <Text style={[styles.navText, currentTab === 'liveMatch' && styles.activeNav]}>Live</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('lineup')}>
+                <Text style={[styles.navIcon, currentTab === 'lineup' && styles.activeNav]}>🛡️</Text>
+                <Text style={[styles.navText, currentTab === 'lineup' && styles.activeNav]}>Lineup</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('teamSheet')}>
+                <Text style={[styles.navIcon, currentTab === 'teamSheet' && styles.activeNav]}>📊</Text>
+                <Text style={[styles.navText, currentTab === 'teamSheet' && styles.activeNav]}>Stats</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+
+        {/* 📁 EXECUTIVE SEASON VAULT MODAL */}
+        <Modal visible={isSeasonArchiveOpen} transparent={true} animationType="slide">
+          <View style={styles.modalOverlayFull}>
+            <SafeAreaView style={{ flex: 1, width: '100%' }}>
+              
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#2E3A44', backgroundColor: '#0B0E14' }}>
+                <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>📁 Season Vault Archive</Text>
+                <TouchableOpacity onPress={() => { setViewingSeasonReport(null); setIsSeasonArchiveOpen(false); }} style={{ backgroundColor: '#1A1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 }}>
+                  <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>Close</Text>
+                </TouchableOpacity>
+              </View>
+
+              {viewingSeasonReport ? (
+                <ScrollView style={{ flex: 1, backgroundColor: '#0B0E14', padding: 15 }} showsVerticalScrollIndicator={true}>
+                  
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                    <TouchableOpacity onPress={() => setViewingSeasonReport(null)} style={{ paddingVertical: 4 }}>
+                      <Text style={{ color: '#94a3b8', fontSize: 14, fontWeight: 'bold' }}>← Back to Reports</Text>
+                    </TouchableOpacity>
+
+                    {parsedVaultSnapshot && (
+                      <TouchableOpacity 
+                        style={{ backgroundColor: '#39FF14', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                        onPress={() => exportVaultPdf(parsedVaultSnapshot)}
+                      >
+                        <Text style={{ color: '#0B0E14', fontWeight: 'bold', fontSize: 13 }}>📄 Export PDF</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {parsedVaultSnapshot ? (
+                    <>
+                      <View style={[styles.card, { borderColor: '#15803D', borderWidth: 2, marginBottom: 12 }]}>
+                        <Text style={{ color: '#ffffff', fontSize: 22, fontWeight: '900', textTransform: 'uppercase' }}>
+                          {parsedVaultSnapshot.team_name}
+                        </Text>
+                        <Text style={{ color: '#39FF14', fontSize: 12, fontWeight: 'bold', marginTop: 4, textTransform: 'uppercase' }}>
+                          {parsedVaultSnapshot.age_group} AGE GROUP • {parsedVaultSnapshot.season_label?.toUpperCase()}
+                        </Text>
+                        <Text style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
+                          Archived: {parsedVaultSnapshot.generated_date || new Date(viewingSeasonReport.created_at).toLocaleDateString()}
+                        </Text>
+                      </View>
+
+                      <View style={[styles.card, { marginBottom: 12 }]}>
+                        <Text style={styles.sectionHeaderModal}>📊 Team Record & Performance Summary</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+                          <View style={{ alignItems: 'center', flex: 1 }}>
+                            <Text style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold' }}>MATCHES</Text>
+                            <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: 'bold', marginTop: 3 }}>
+                              {parsedVaultSnapshot.record?.total_matches || 0} Games
+                            </Text>
+                          </View>
+                          <View style={{ alignItems: 'center', flex: 1 }}>
+                            <Text style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold' }}>RECORD</Text>
+                            <Text style={{ color: '#39FF14', fontSize: 15, fontWeight: 'bold', marginTop: 3 }}>
+                              {parsedVaultSnapshot.record?.wins}W - {parsedVaultSnapshot.record?.draws}D - {parsedVaultSnapshot.record?.losses}L
+                            </Text>
+                          </View>
+                          <View style={{ alignItems: 'center', flex: 1 }}>
+                            <Text style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold' }}>WIN RATE</Text>
+                            <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: 'bold', marginTop: 3 }}>
+                              {parsedVaultSnapshot.record?.win_rate || 0}%
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#2E3A44', alignItems: 'center' }}>
+                          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold' }}>
+                            Goals: {parsedVaultSnapshot.record?.goals_for} Scored / {parsedVaultSnapshot.record?.goals_against} Conceded ({parsedVaultSnapshot.record?.goal_diff > 0 ? '+' : ''}{parsedVaultSnapshot.record?.goal_diff} GD)
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={[styles.card, { marginBottom: 12 }]}>
+                        <Text style={styles.sectionHeaderModal}>⭐ Individual Season Honours</Text>
+                        <View style={{ marginTop: 8 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ color: '#eab308', fontSize: 16, width: 26 }}>🏆</Text>
+                            <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>Golden Boot:</Text>
+                            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_scorer}</Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ color: '#3b82f6', fontSize: 16, width: 26 }}>🅰️</Text>
+                            <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>Playmaker:</Text>
+                            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_assister}</Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ color: '#39FF14', fontSize: 16, width: 26 }}>⭐</Text>
+                            <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>CPOTS (Coach):</Text>
+                            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_coach_potm}</Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ color: '#a855f7', fontSize: 16, width: 26 }}>🌟</Text>
+                            <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>{parsedVaultSnapshot.honours?.parent_award_title || 'PPOTS'}:</Text>
+                            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_parent_potm}</Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {parsedVaultSnapshot.scout_notes ? (
+                        <View style={[styles.card, { marginBottom: 12 }]}>
+                          <Text style={styles.sectionHeaderModal}>Head Coach Season Review</Text>
+                          <Text style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 18, marginTop: 6 }}>
+                            {parsedVaultSnapshot.scout_notes}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      <View style={[styles.card, { marginBottom: 12 }]}>
+                        <Text style={styles.sectionHeaderModal}>👥 Squad Master Stats Breakdown</Text>
+                        <View style={{ marginTop: 8 }}>
+                          {(parsedVaultSnapshot.squad_sheet || []).map((p, idx) => {
+                            const avgM = p.apps > 0 ? Math.round((p.total_minutes_played || 0) / p.apps) : 0;
+                            const potm = (p.motm || 0) + (p.parent_motm || 0);
+                            return (
+                              <View key={p.id || idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13 }}>
+                                    <Text style={{ color: '#39FF14' }}>#{p.squad_number || '-'} </Text>{p.name} <Text style={{ color: '#64748b', fontSize: 11 }}>({p.position})</Text>
+                                  </Text>
+                                  <Text style={{ color: '#94a3b8', fontSize: 10, marginTop: 2 }}>
+                                    {p.apps} apps • {p.total_minutes_played || 0}m ({avgM}m/g)
+                                  </Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+                                  <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 12 }}>{p.goals || 0}G</Text>
+                                  <Text style={{ color: '#3b82f6', fontWeight: 'bold', fontSize: 12 }}>{p.assists || 0}A</Text>
+                                  <Text style={{ color: '#eab308', fontWeight: 'bold', fontSize: 12 }}>{potm}⭐</Text>
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </View>
+
+                      <View style={[styles.card, { marginBottom: 35 }]}>
+                        <Text style={styles.sectionHeaderModal}>Season Match Archive & Results</Text>
+                        <View style={{ marginTop: 8 }}>
+                          {(parsedVaultSnapshot.match_history_archive || []).length === 0 ? (
+                            <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'center', paddingVertical: 10 }}>No match history recorded.</Text>
+                          ) : (
+                            (parsedVaultSnapshot.match_history_archive || []).map((m, idx) => (
+                              <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
+                                <View>
+                                  <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13 }}>vs {m.opponent}</Text>
+                                  <Text style={{ color: '#64748b', fontSize: 10 }}>
+                                    {m.created_at ? formatUkDate(new Date(m.created_at)) : 'Match'} • {m.match_type}
+                                  </Text>
+                                </View>
+                                <View style={{ alignItems: 'flex-end' }}>
+                                  <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 14 }}>
+                                    {m.team_score} - {m.opponent_score}
+                                  </Text>
+                                  <Text style={{ color: m.result === 'W' ? '#39FF14' : m.result === 'L' ? '#ef4444' : '#eab308', fontSize: 11, fontWeight: 'bold' }}>
+                                    {m.result}
+                                  </Text>
+                                </View>
+                              </View>
+                            ))
+                          )}
+                        </View>
+                      </View>
+                    </>
+                  ) : (
+                    <View style={[styles.card, { borderColor: '#3b82f6' }]}>
+                      <Text style={{ color: '#ffffff', fontSize: 13, lineHeight: 20 }}>
+                        {viewingSeasonReport.report_text}
+                      </Text>
+                    </View>
+                  )}
+                </ScrollView>
+              ) : (
+                <ScrollView style={{ flex: 1, backgroundColor: '#0B0E14', padding: 15 }}>
+                  {seasonReports.length === 0 ? (
+                    <Text style={{ color: '#94a3b8', textAlign: 'center', marginTop: 40 }}>
+                      No archived seasons found for this team.
+                    </Text>
+                  ) : (
+                    seasonReports.map(report => (
+                      <TouchableOpacity 
+                        key={report.id} 
+                        style={[styles.card, { borderColor: '#39FF14', paddingVertical: 16 }]}
+                        onPress={() => setViewingSeasonReport(report)}
+                      >
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 17 }}>
+                            {report.season_label}
+                          </Text>
+                          <Text style={{ color: '#3b82f6', fontWeight: 'bold', fontSize: 12 }}>
+                            View Report ➔
+                          </Text>
+                        </View>
+                        <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>
+                          Archived: {new Date(report.created_at).toLocaleDateString()}
+                        </Text>
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </ScrollView>
+              )}
+            </SafeAreaView>
+          </View>
+        </Modal>
+
+        <MatchArchiveModal
+          visible={isMatchArchiveOpen}
+          onClose={() => setIsMatchArchiveOpen(false)}
+          matchHistory={matchHistory}
+          appMode={appMode}
+          teamSheet={teamSheet}
+          startArchiveGoalEdit={startArchiveGoalEdit}
+          archiveEditStep={archiveEditStep}
+          selectedArchiveScorer={selectedArchiveScorer}
+          selectArchiveScorer={selectArchiveScorer}
+          finishArchiveGoalEdit={finishArchiveGoalEdit}
+          setArchiveEditStep={setArchiveEditStep}
+          setEditingArchiveMatch={setEditingArchiveMatch}
+          setEditingArchiveEventIdx={setEditingArchiveEventIdx}
+        />
+
+        <SeasonResetModal
+          visible={isSeasonResetModalOpen}
+          onClose={() => { setIsSeasonResetModalOpen(false); setSeasonResetConfirmText(''); }}
+          seasonResetConfirmText={seasonResetConfirmText}
+          setSeasonResetConfirmText={setSeasonResetConfirmText}
+          startNewSeasonFlow={startNewSeasonFlow}
+          isSavingSeason={isSavingSeason}
+        />
+
+        <SubReasonModal
+          visible={subReasonModalState.visible}
+          onClose={() => setSubReasonModalState({ visible: false, offPlayer: null, onPlayer: null })}
+          subReasonModalState={subReasonModalState}
+          finalizeSubWithReason={finalizeSubWithReason}
+        />
+
+        <HalfTimeSubModal
+          visible={isHalfTimeSubModalOpen}
+          onClose={() => setIsHalfTimeSubModalOpen(false)}
+          onPitchPlayers={onPitchPlayers}
+          subs={subs}
+          onConfirmBatchSubs={handleBatchHalfTimeSubs}
+        />
+
+        <FormationModal
+          visible={isFormationModalOpen}
+          onClose={() => setIsFormationModalOpen(false)}
+          activeFormation={activeFormation}
+          setActiveFormation={setActiveFormation}
+          teamSheet={teamSheet}
+          setTeamSheet={setTeamSheet}
+          ageGroup={activeTeamObj?.age_group}
+          activeTeamId={activeTeamId}
+          setMyTeams={setMyTeams}
+        />
+
+        <TafeModal
+          visible={isTafeModalOpen}
+          onClose={() => setIsTafeModalOpen(false)}
+          tafeStep={tafeStep}
+          tafeBackline={tafeBackline}
+          tafeSuggestions={tafeSuggestions}
+          tafeOther={tafeOther}
+          runTafeAlgorithm={runTafeAlgorithm}
+          applyTafeFormation={applyTafeFormation}
+          is9v9Team={is9v9Team}
+        />
+
+        <CreateTeamModal
+          visible={isCreateTeamModalOpen}
+          onClose={() => setIsCreateTeamModalOpen(false)}
+          newTeamName={newTeamName}
+          setNewTeamName={setNewTeamName}
+          newTeamAgeGroup={newTeamAgeGroup}
+          setNewTeamAgeGroup={setNewTeamAgeGroup}
+          ageGroupOptions={ageGroupOptions}
+          createNewTeamFromSidebar={createNewTeamFromSidebar}
+        />
+
+        <StaffManagementModal
+          visible={isStaffModalOpen}
+          onClose={() => setIsStaffModalOpen(false)}
+          activeTeamObj={activeTeamObj}
+          currentUserId={session?.user?.id}
+          userRole={profile?.role}
+          isSuperUser={isSuperUser}
+          onTeamUpdated={() => fetchUserProfile(session?.user?.id)}
+          shareStaffInvite={shareStaffInvite}
+        />
+
+        <InviteModal
+          visible={isInviteModalOpen}
+          onClose={() => setIsInviteModalOpen(false)}
+          appMode={appMode}
+          userRole={profile?.role}
+          activeTeamObj={activeTeamObj}
+          teamSheet={teamSheet}
+          teamAgeGroup={effectiveAgeGroup}
+          activePlayer={activePlayer}
+          shareStaffInvite={shareStaffInvite}
+          shareFanInvite={shareFanInvite}
+          shareCoParentInvite={shareCoParentInvite}
+          onJoinCode={handleJoinCode}
+        />
+
+        <CoachNotesStagingModal
+          visible={isNotesStagingModalOpen}
+          onClose={() => setIsNotesStagingModalOpen(false)}
+          teamSheet={teamSheet}
+          activeTeamId={activeTeamId}
+          onNotesPushed={() => fetchTeamData(session?.user?.id, activeTeamId)}
+        />
+
+        <EditPlayerProfileModal
+          editingPlayer={editingPlayer}
+          setEditingPlayer={setEditingPlayer}
+          updateFullPlayerProfile={updateFullPlayerProfile}
+          assignPlayerRole={assignPlayerRole}
+          initiateDeletePlayer={initiateDeletePlayer}
+          profile={profile}
+          appMode={appMode}
+        />
+
+        <LiveEventModals
+          liveEventMode={liveEventMode}
+          setLiveEventMode={setLiveEventMode}
+          pendingEvent={pendingEvent}
+          opponentName={opponentName}
+          onPitchPlayers={onPitchPlayers}
+          subs={subs}
+          teamSheet={teamSheet}
+          selectGoalScorer={selectGoalScorer}
+          selectGoalAssist={selectGoalAssist}
+          selectCardType={selectCardType}
+          finishCardFlow={finishCardFlow}
+          promptSubReason={promptSubReason}
+          selectCoachMotm={selectCoachMotm}
+          selectParentMotm={selectParentMotm}
+        />
+
+        <PdfExportModal
+          isPdfExportModalOpen={isPdfExportModalOpen}
+          setIsPdfExportModalOpen={setIsPdfExportModalOpen}
+          pdfExportStep={pdfExportStep}
+          setPdfExportStep={setPdfExportStep}
+          exportMatchdaySummary={exportMatchdaySummary}
+          teamSheet={teamSheet}
+          myTeams={myTeams}
+          activeTeamId={activeTeamId}
+          activeTeamObj={activeTeamObj}
+          effectiveAgeGroup={effectiveAgeGroup}
+          teamLogoUrl={teamLogoUrl}
+          generatePlayerReportCard={generatePlayerReportCard}
+        />
+
+        <Modal visible={isFaWebviewOpen} animationType="slide">
+          <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0E14' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
+              <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>🏆 FA League Table</Text>
+              <TouchableOpacity onPress={() => setIsFaWebviewOpen(false)} style={{ backgroundColor: '#1A1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 }}>
                 <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>Close</Text>
               </TouchableOpacity>
             </View>
-
-            {viewingSeasonReport ? (
-              <ScrollView style={{ flex: 1, backgroundColor: '#0B0E14', padding: 15 }} showsVerticalScrollIndicator={true}>
-                
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-                  <TouchableOpacity onPress={() => setViewingSeasonReport(null)} style={{ paddingVertical: 4 }}>
-                    <Text style={{ color: '#94a3b8', fontSize: 14, fontWeight: 'bold' }}>← Back to Reports</Text>
-                  </TouchableOpacity>
-
-                  {parsedVaultSnapshot && (
-                    <TouchableOpacity 
-                      style={{ backgroundColor: '#39FF14', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                      onPress={() => exportVaultPdf(parsedVaultSnapshot)}
-                    >
-                      <Text style={{ color: '#0B0E14', fontWeight: 'bold', fontSize: 13 }}>📄 Export PDF</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                {parsedVaultSnapshot ? (
-                  <>
-                    <View style={[styles.card, { borderColor: '#15803D', borderWidth: 2, marginBottom: 12 }]}>
-                      <Text style={{ color: '#ffffff', fontSize: 22, fontWeight: '900', textTransform: 'uppercase' }}>
-                        {parsedVaultSnapshot.team_name}
-                      </Text>
-                      <Text style={{ color: '#39FF14', fontSize: 12, fontWeight: 'bold', marginTop: 4, textTransform: 'uppercase' }}>
-                        {parsedVaultSnapshot.age_group} AGE GROUP • {parsedVaultSnapshot.season_label?.toUpperCase()}
-                      </Text>
-                      <Text style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
-                        Archived: {parsedVaultSnapshot.generated_date || new Date(viewingSeasonReport.created_at).toLocaleDateString()}
-                      </Text>
-                    </View>
-
-                    <View style={[styles.card, { marginBottom: 12 }]}>
-                      <Text style={styles.sectionHeaderModal}>📊 Team Record & Performance Summary</Text>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
-                        <View style={{ alignItems: 'center', flex: 1 }}>
-                          <Text style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold' }}>MATCHES</Text>
-                          <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: 'bold', marginTop: 3 }}>
-                            {parsedVaultSnapshot.record?.total_matches || 0} Games
-                          </Text>
-                        </View>
-                        <View style={{ alignItems: 'center', flex: 1 }}>
-                          <Text style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold' }}>RECORD</Text>
-                          <Text style={{ color: '#39FF14', fontSize: 15, fontWeight: 'bold', marginTop: 3 }}>
-                            {parsedVaultSnapshot.record?.wins}W - {parsedVaultSnapshot.record?.draws}D - {parsedVaultSnapshot.record?.losses}L
-                          </Text>
-                        </View>
-                        <View style={{ alignItems: 'center', flex: 1 }}>
-                          <Text style={{ color: '#64748b', fontSize: 10, fontWeight: 'bold' }}>WIN RATE</Text>
-                          <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: 'bold', marginTop: 3 }}>
-                            {parsedVaultSnapshot.record?.win_rate || 0}%
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={{ marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#2E3A44', alignItems: 'center' }}>
-                        <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold' }}>
-                          Goals: {parsedVaultSnapshot.record?.goals_for} Scored / {parsedVaultSnapshot.record?.goals_against} Conceded ({parsedVaultSnapshot.record?.goal_diff > 0 ? '+' : ''}{parsedVaultSnapshot.record?.goal_diff} GD)
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={[styles.card, { marginBottom: 12 }]}>
-                      <Text style={styles.sectionHeaderModal}>⭐ Individual Season Honours</Text>
-                      <View style={{ marginTop: 8, gap: 8 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Text style={{ color: '#eab308', fontSize: 16, width: 26 }}>🏆</Text>
-                          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>Golden Boot:</Text>
-                          <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_scorer}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Text style={{ color: '#3b82f6', fontSize: 16, width: 26 }}>🅰️</Text>
-                          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>Playmaker:</Text>
-                          <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_assister}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Text style={{ color: '#39FF14', fontSize: 16, width: 26 }}>⭐</Text>
-                          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>CPOTS (Coach):</Text>
-                          <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_coach_potm}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Text style={{ color: '#a855f7', fontSize: 16, width: 26 }}>🌟</Text>
-                          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: 'bold', width: 95 }}>{parsedVaultSnapshot.honours?.parent_award_title || 'PPOTS'}:</Text>
-                          <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13, flex: 1 }}>{parsedVaultSnapshot.honours?.top_parent_potm}</Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    {parsedVaultSnapshot.scout_notes ? (
-                      <View style={[styles.card, { marginBottom: 12 }]}>
-                        <Text style={styles.sectionHeaderModal}>Head Coach Season Review</Text>
-                        <Text style={{ color: '#cbd5e1', fontSize: 12, lineHeight: 18, marginTop: 6 }}>
-                          {parsedVaultSnapshot.scout_notes}
-                        </Text>
-                      </View>
-                    ) : null}
-
-                    <View style={[styles.card, { marginBottom: 12 }]}>
-                      <Text style={styles.sectionHeaderModal}>👥 Squad Master Stats Breakdown</Text>
-                      <View style={{ marginTop: 8 }}>
-                        {(parsedVaultSnapshot.squad_sheet || []).map((p, idx) => {
-                          const avgM = p.apps > 0 ? Math.round((p.total_minutes_played || 0) / p.apps) : 0;
-                          const potm = (p.motm || 0) + (p.parent_motm || 0);
-                          return (
-                            <View key={p.id || idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
-                              <View style={{ flex: 1 }}>
-                                <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13 }}>
-                                  <Text style={{ color: '#39FF14' }}>#{p.squad_number || '-'} </Text>{p.name} <Text style={{ color: '#64748b', fontSize: 11 }}>({p.position})</Text>
-                                </Text>
-                                <Text style={{ color: '#94a3b8', fontSize: 10, marginTop: 2 }}>
-                                  {p.apps} apps • {p.total_minutes_played || 0}m ({avgM}m/g)
-                                </Text>
-                              </View>
-                              <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
-                                <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 12 }}>{p.goals || 0}G</Text>
-                                <Text style={{ color: '#3b82f6', fontWeight: 'bold', fontSize: 12 }}>{p.assists || 0}A</Text>
-                                <Text style={{ color: '#eab308', fontWeight: 'bold', fontSize: 12 }}>{potm}⭐</Text>
-                              </View>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    </View>
-
-                    <View style={[styles.card, { marginBottom: 35 }]}>
-                      <Text style={styles.sectionHeaderModal}>Season Match Archive & Results</Text>
-                      <View style={{ marginTop: 8 }}>
-                        {(parsedVaultSnapshot.match_history_archive || []).length === 0 ? (
-                          <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'center', paddingVertical: 10 }}>No match history recorded.</Text>
-                        ) : (
-                          (parsedVaultSnapshot.match_history_archive || []).map((m, idx) => (
-                            <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
-                              <View>
-                                <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13 }}>vs {m.opponent}</Text>
-                                <Text style={{ color: '#64748b', fontSize: 10 }}>
-                                  {m.created_at ? formatUkDate(new Date(m.created_at)) : 'Match'} • {m.match_type}
-                                </Text>
-                              </View>
-                              <View style={{ alignItems: 'flex-end' }}>
-                                <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 14 }}>
-                                  {m.team_score} - {m.opponent_score}
-                                </Text>
-                                <Text style={{ color: m.result === 'W' ? '#39FF14' : m.result === 'L' ? '#ef4444' : '#eab308', fontSize: 11, fontWeight: 'bold' }}>
-                                  {m.result}
-                                </Text>
-                              </View>
-                            </View>
-                          ))
-                        )}
-                      </View>
-                    </View>
-                  </>
-                ) : (
-                  <View style={[styles.card, { borderColor: '#3b82f6' }]}>
-                    <Text style={{ color: '#ffffff', fontSize: 13, lineHeight: 20 }}>
-                      {viewingSeasonReport.report_text}
-                    </Text>
-                  </View>
-                )}
-              </ScrollView>
+            {faLeagueUrl ? (
+              <WebView 
+                source={{ uri: faLeagueUrl }} 
+                style={{ flex: 1 }}
+                injectedJavaScript={`
+                  const style = document.createElement('style');
+                  style.innerHTML = 'a, button, input, select, textarea { pointer-events: none !important; cursor: default !important; }';
+                  document.head.appendChild(style);
+                  true;
+                `}
+                onShouldStartLoadWithRequest={(request) => request.url === faLeagueUrl}
+              />
             ) : (
-              <ScrollView style={{ flex: 1, backgroundColor: '#0B0E14', padding: 15 }}>
-                {seasonReports.length === 0 ? (
-                  <Text style={{ color: '#94a3b8', textAlign: 'center', marginTop: 40 }}>
-                    No archived seasons found for this team.
-                  </Text>
-                ) : (
-                  seasonReports.map(report => (
-                    <TouchableOpacity 
-                      key={report.id} 
-                      style={[styles.card, { borderColor: '#39FF14', paddingVertical: 16 }]}
-                      onPress={() => setViewingSeasonReport(report)}
-                    >
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text style={{ color: '#39FF14', fontWeight: 'bold', fontSize: 17 }}>
-                          {report.season_label}
-                        </Text>
-                        <Text style={{ color: '#3b82f6', fontWeight: 'bold', fontSize: 12 }}>
-                          View Report ➔
-                        </Text>
-                      </View>
-                      <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>
-                        Archived: {new Date(report.created_at).toLocaleDateString()}
-                      </Text>
-                    </TouchableOpacity>
-                  ))
-                )}
-              </ScrollView>
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                <Text style={{ color: '#cbd5e1', textAlign: 'center', fontSize: 15, marginBottom: 15 }}>
+                  No FA League Table URL set for this team yet.
+                </Text>
+              </View>
             )}
           </SafeAreaView>
-        </View>
-      </Modal>
+        </Modal>
 
-      <MatchArchiveModal
-        visible={isMatchArchiveOpen}
-        onClose={() => setIsMatchArchiveOpen(false)}
-        matchHistory={matchHistory}
-        appMode={appMode}
-        teamSheet={teamSheet}
-        startArchiveGoalEdit={startArchiveGoalEdit}
-        archiveEditStep={archiveEditStep}
-        selectedArchiveScorer={selectedArchiveScorer}
-        selectArchiveScorer={selectArchiveScorer}
-        finishArchiveGoalEdit={finishArchiveGoalEdit}
-        setArchiveEditStep={setArchiveEditStep}
-        setEditingArchiveMatch={setEditingArchiveMatch}
-        setEditingArchiveEventIdx={setEditingArchiveEventIdx}
-      />
-
-      <SeasonResetModal
-        visible={isSeasonResetModalOpen}
-        onClose={() => { setIsSeasonResetModalOpen(false); setSeasonResetConfirmText(''); }}
-        seasonResetConfirmText={seasonResetConfirmText}
-        setSeasonResetConfirmText={setSeasonResetConfirmText}
-        startNewSeasonFlow={startNewSeasonFlow}
-        isSavingSeason={isSavingSeason}
-      />
-
-      <SubReasonModal
-        visible={subReasonModalState.visible}
-        onClose={() => setSubReasonModalState({ visible: false, offPlayer: null, onPlayer: null })}
-        subReasonModalState={subReasonModalState}
-        finalizeSubWithReason={finalizeSubWithReason}
-      />
-
-      {/* 🔄 HALF-TIME BULK SUBSTITUTIONS MODAL */}
-      <HalfTimeSubModal
-        visible={isHalfTimeSubModalOpen}
-        onClose={() => setIsHalfTimeSubModalOpen(false)}
-        onPitchPlayers={onPitchPlayers}
-        subs={subs}
-        onConfirmBatchSubs={handleBatchHalfTimeSubs}
-      />
-
-      <FormationModal
-        visible={isFormationModalOpen}
-        onClose={() => setIsFormationModalOpen(false)}
-        activeFormation={activeFormation}
-        setActiveFormation={setActiveFormation}
-        teamSheet={teamSheet}
-        setTeamSheet={setTeamSheet}
-        ageGroup={activeTeamObj?.age_group}
-        activeTeamId={activeTeamId}
-        setMyTeams={setMyTeams}
-      />
-
-      <TafeModal
-        visible={isTafeModalOpen}
-        onClose={() => setIsTafeModalOpen(false)}
-        tafeStep={tafeStep}
-        tafeBackline={tafeBackline}
-        tafeSuggestions={tafeSuggestions}
-        tafeOther={tafeOther}
-        runTafeAlgorithm={runTafeAlgorithm}
-        applyTafeFormation={applyTafeFormation}
-        is9v9Team={is9v9Team}
-      />
-
-      <CreateTeamModal
-        visible={isCreateTeamModalOpen}
-        onClose={() => setIsCreateTeamModalOpen(false)}
-        newTeamName={newTeamName}
-        setNewTeamName={setNewTeamName}
-        newTeamAgeGroup={newTeamAgeGroup}
-        setNewTeamAgeGroup={setNewTeamAgeGroup}
-        ageGroupOptions={ageGroupOptions}
-        createNewTeamFromSidebar={createNewTeamFromSidebar}
-      />
-
-      <StaffManagementModal
-        visible={isStaffModalOpen}
-        onClose={() => setIsStaffModalOpen(false)}
-        activeTeamObj={activeTeamObj}
-        currentUserId={session?.user?.id}
-        userRole={profile?.role}
-        isSuperUser={isSuperUser}
-        onTeamUpdated={() => fetchUserProfile(session?.user?.id)}
-        shareStaffInvite={shareStaffInvite}
-      />
-
-      <InviteModal
-        visible={isInviteModalOpen}
-        onClose={() => setIsInviteModalOpen(false)}
-        appMode={appMode}
-        userRole={profile?.role}
-        activeTeamObj={activeTeamObj}
-        teamSheet={teamSheet}
-        teamAgeGroup={effectiveAgeGroup}
-        activePlayer={activePlayer}
-        shareStaffInvite={shareStaffInvite}
-        shareFanInvite={shareFanInvite}
-        shareCoParentInvite={shareCoParentInvite}
-      />
-
-      <CoachNotesStagingModal
-        visible={isNotesStagingModalOpen}
-        onClose={() => setIsNotesStagingModalOpen(false)}
-        teamSheet={teamSheet}
-        activeTeamId={activeTeamId}
-        onNotesPushed={() => fetchTeamData(session?.user?.id, activeTeamId)}
-      />
-
-      <EditPlayerProfileModal
-        editingPlayer={editingPlayer}
-        setEditingPlayer={setEditingPlayer}
-        updateFullPlayerProfile={updateFullPlayerProfile}
-        assignPlayerRole={assignPlayerRole}
-        initiateDeletePlayer={initiateDeletePlayer}
-        profile={profile}
-        appMode={appMode}
-      />
-
-      <LiveEventModals
-        liveEventMode={liveEventMode}
-        setLiveEventMode={setLiveEventMode}
-        pendingEvent={pendingEvent}
-        opponentName={opponentName}
-        onPitchPlayers={onPitchPlayers}
-        subs={subs}
-        teamSheet={teamSheet}
-        selectGoalScorer={selectGoalScorer}
-        selectGoalAssist={selectGoalAssist}
-        selectCardType={selectCardType}
-        finishCardFlow={finishCardFlow}
-        promptSubReason={promptSubReason}
-        selectCoachMotm={selectCoachMotm}
-        selectParentMotm={selectParentMotm}
-      />
-
-      <PdfExportModal
-        isPdfExportModalOpen={isPdfExportModalOpen}
-        setIsPdfExportModalOpen={setIsPdfExportModalOpen}
-        pdfExportStep={pdfExportStep}
-        setPdfExportStep={setPdfExportStep}
-        exportMatchdaySummary={exportMatchdaySummary}
-        teamSheet={teamSheet}
-        myTeams={myTeams}
-        activeTeamId={activeTeamId}
-        activeTeamObj={activeTeamObj}
-        effectiveAgeGroup={effectiveAgeGroup}
-        teamLogoUrl={teamLogoUrl}
-        generatePlayerReportCard={generatePlayerReportCard}
-      />
-
-      <Modal visible={isFaWebviewOpen} animationType="slide">
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0E14' }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
-            <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>🏆 FA League Table</Text>
-            <TouchableOpacity onPress={() => setIsFaWebviewOpen(false)} style={{ backgroundColor: '#1A1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 }}>
-              <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>Close</Text>
-            </TouchableOpacity>
-          </View>
-          {faLeagueUrl ? (
-            <WebView 
-              source={{ uri: faLeagueUrl }} 
-              style={{ flex: 1 }}
-              injectedJavaScript={`
-                const style = document.createElement('style');
-                style.innerHTML = 'a, button, input, select, textarea { pointer-events: none !important; cursor: default !important; }';
-                document.head.appendChild(style);
-                true;
-              `}
-              onShouldStartLoadWithRequest={(request) => request.url === faLeagueUrl}
-            />
-          ) : (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-              <Text style={{ color: '#cbd5e1', textAlign: 'center', fontSize: 15, marginBottom: 15 }}>
-                No FA League Table URL set for this team yet.
-              </Text>
-            </View>
-          )}
-        </SafeAreaView>
-      </Modal>
-
-      <Modal 
-        visible={!!activeVideoId} 
-        transparent={true} 
-        animationType="fade"
-        supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
-      >
-        <View style={styles.modalOverlayFull}>
-          <View style={[styles.modalBoxFull, { padding: 10, backgroundColor: '#1A1F26' }]}>
-            <Text style={styles.modalTitle}>📹 Tactical Video Analysis</Text>
-            {activeVideoId && (
-              <YoutubePlayer
-                height={220}
-                play={true}
-                videoId={activeVideoId}
-                onChangeState={(event: string) => {
-                  if (event === "ended") setActiveVideoId(null);
-                }}
-              />
-            )}
-            <TouchableOpacity style={[styles.cancelBtn, { marginTop: 15 }]} onPress={() => setActiveVideoId(null)}>
-              <Text style={styles.cancelBtnText}>✕ Close Player</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={!!drillSelectorMode} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setDrillSelectorMode(null)} />
-          <View style={[styles.modalBox, { maxHeight: '70%' }]}>
-            <Text style={styles.modalTitle}>Select Training Phase</Text>
-            <ScrollView style={{ width: '100%' }}>
-              {(drillSelectorMode === 'warmup' ? trainingLibrary.warmups : drillSelectorMode === 'rondo' ? trainingLibrary.rondos : drillSelectorMode === 'ssg' ? trainingLibrary.ssgs : trainingLibrary.drills).map(item => (
-                <TouchableOpacity 
-                  key={item.id} 
-                  style={styles.inviteRow} 
-                  onPress={() => {
-                    if (drillSelectorMode === 'warmup') setSelectedWarmup(item);
-                    if (drillSelectorMode === 'rondo') setSelectedDrill1(item);
-                    if (drillSelectorMode === 'drill2') setSelectedDrill2(item);
-                    if (drillSelectorMode === 'ssg') setSelectedSSG(item);
-                    setDrillSelectorMode(null);
+        <Modal 
+          visible={!!activeVideoId} 
+          transparent={true} 
+          animationType="fade"
+          supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
+        >
+          <View style={styles.modalOverlayFull}>
+            <View style={[styles.modalBoxFull, { padding: 10, backgroundColor: '#1A1F26' }]}>
+              <Text style={styles.modalTitle}>📹 Tactical Video Analysis</Text>
+              {activeVideoId && (
+                <YoutubePlayer
+                  height={220}
+                  play={true}
+                  videoId={activeVideoId}
+                  onChangeState={(event: string) => {
+                    if (event === "ended") setActiveVideoId(null);
                   }}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.inviteName}>{item.category ? `[${item.category}] ` : ''}{item.title}</Text>
-                    <Text style={[styles.inviteCodeText, { color: '#94a3b8' }]} numberOfLines={2}>{item.desc || item.description || item.tactical_objective}</Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setDrillSelectorMode(null)}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={!!lineupAssignPlayer} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setLineupAssignPlayer(null)} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Matchday Role: {lineupAssignPlayer?.name || 'Player'}</Text>
-            
-            <Text style={styles.inputLabel}>Assign Pitch Slot (Starter):</Text>
-            <View style={styles.positionGrid}>
-              {(currentAvailablePositions || []).map(pos => (
-                <TouchableOpacity 
-                  key={pos} 
-                  style={[styles.gridBtn, lineupAssignPlayer?.matchday_position === pos && lineupAssignPlayer?.is_starter && { backgroundColor: '#39FF14' }]} 
-                  onPress={() => assignPlayerRole(lineupAssignPlayer, pos, true)}
-                >
-                  <Text style={[styles.gridBtnText, lineupAssignPlayer?.matchday_position === pos && lineupAssignPlayer?.is_starter && { color: '#0B0E14' }]}>{pos}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <View style={styles.divider} />
-
-            <TouchableOpacity style={styles.benchBtn} onPress={() => assignPlayerRole(lineupAssignPlayer, 'Bench', false)}>
-              <Text style={styles.benchBtnText}>🔄 Set as Substitute (Bench)</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.cancelBtn, { marginTop: 15 }]} onPress={() => setLineupAssignPlayer(null)}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={!!activeLivePlayer && liveEventMode === 'none'} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setActiveLivePlayer(null)} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Quick Action: {activeLivePlayer?.name || 'Player'}</Text>
-            
-            {getPosCategory(activeLivePlayer?.position) === 'GK' && (
-              <TouchableOpacity style={[styles.liveActionBtn, { width: '100%', marginBottom: 15 }]} onPress={logLiveSave}>
-                <Text style={styles.liveActionIcon}>🧤</Text>
-                <Text style={styles.liveActionText}>Log Save</Text>
-              </TouchableOpacity>
-            )}
-
-            <TouchableOpacity style={[styles.liveActionBtn, { width: '100%', borderColor: '#3b82f6', borderWidth: 2 }]} onPress={() => initSubFlow(activeLivePlayer)}>
-              <Text style={styles.liveActionIcon}>🔄</Text>
-              <Text style={[styles.liveActionText, { color: '#3b82f6' }]}>Substitute Player</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.cancelBtn, { marginTop: 15 }]} onPress={() => setActiveLivePlayer(null)}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={!!teamToDelete} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => { setTeamToDelete(null); setDeleteTeamConfirmText(''); }} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Delete Entire Team</Text>
-            <Text style={[styles.bulletText, { marginBottom: 15, textAlign: 'center' }]}>
-              Type <Text style={{fontWeight: 'bold', color: '#ef4444'}}>delete team</Text> to permanently remove <Text style={{color: '#39FF14', fontWeight: 'bold'}}>{teamToDelete?.name}</Text> and all associated data. This is completely irreversible.
-            </Text>
-            <TextInput 
-              style={[styles.input, { textAlign: 'center', fontWeight: 'bold', fontSize: 18 }]} 
-              placeholder="Type delete team" 
-              placeholderTextColor="#64748b" 
-              value={deleteTeamConfirmText} 
-              onChangeText={setDeleteTeamConfirmText} 
-              autoCapitalize="none"
-            />
-            <TouchableOpacity style={[styles.deleteBtn, { opacity: deleteTeamConfirmText.trim().toLowerCase() === 'delete team' ? 1 : 0.5 }]} onPress={finalizeDeleteTeam}>
-              <Text style={styles.deleteBtnText}>Confirm Delete Team</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => { setTeamToDelete(null); setDeleteTeamConfirmText(''); }}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={!!playerToDelete} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => { setPlayerToDelete(null); setDeleteConfirmText(''); }} />
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Confirm Deletion</Text>
-            <Text style={[styles.bulletText, { marginBottom: 15, textAlign: 'center' }]}>
-              Type <Text style={{fontWeight: 'bold', color: '#ef4444'}}>Delete</Text> to permanently remove {playerToDelete?.name} and all their history. This cannot be undone.
-            </Text>
-            <TextInput 
-              style={[styles.input, { textAlign: 'center', fontWeight: 'bold', fontSize: 18 }]} 
-              placeholder="Type Delete" 
-              placeholderTextColor="#64748b" 
-              value={deleteConfirmText} 
-              onChangeText={setDeleteConfirmText} 
-              autoCapitalize="none"
-            />
-            <TouchableOpacity style={[styles.deleteBtn, { opacity: deleteConfirmText.trim().toLowerCase() === 'delete' ? 1 : 0.5 }]} onPress={finalizeDeletePlayer}>
-              <Text style={styles.deleteBtnText}>Confirm Delete</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => { setPlayerToDelete(null); setDeleteConfirmText(''); }}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={isAddPlayerModalOpen} transparent={true} animationType="slide">
-        <View style={styles.modalOverlayFull}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setIsAddPlayerModalOpen(false)} />
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' }} pointerEvents="box-none">
-            <View style={[styles.modalBoxFull, { maxHeight: '85%', flexShrink: 1 }]}>
-              <ScrollView style={{ flexGrow: 0 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
-                <Text style={styles.modalTitle}>Add Player Quick Setup</Text>
-                <TextInput style={styles.input} placeholder="Player Full Name" placeholderTextColor="#64748b" value={newPlayerName} onChangeText={setNewPlayerName} />
-                <TextInput style={styles.input} placeholder="Squad Jersey Number (e.g. 10)" placeholderTextColor="#64748b" keyboardType="numeric" value={newSquadNumber} onChangeText={setNewSquadNumber} />
-                
-                <Text style={[styles.inputLabel, { marginTop: 10 }]}>Dominant Foot (Left to Right):</Text>
-                <View style={styles.footednessContainer}>
-                  <Text style={styles.footLabel}>L</Text>
-                  {[1, 2, 3, 4, 5].map(val => (
-                    <TouchableOpacity 
-                      key={val} 
-                      onPress={() => setNewPlayerFootedness(val)}
-                      style={[styles.footDot, newPlayerFootedness === val && styles.footDotActive]}
-                    />
-                  ))}
-                  <Text style={styles.footLabel}>R</Text>
-                </View>
-
-                <Text style={[styles.inputLabel, { marginTop: 10 }]}>Primary Position:</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                  {(profilePositions || []).map(pos => (
-                    <TouchableOpacity key={pos} style={[styles.fmtBtn, newPlayerPosition === pos && styles.fmtBtnActive]} onPress={() => setNewPlayerPosition(pos)}><Text style={[styles.fmtBtnText, newPlayerPosition === pos && styles.fmtBtnTextActive]}>{pos}</Text></TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={styles.inputLabel}>Secondary Position:</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                  {(profileSecondaryPositions || []).map(pos => (
-                    <TouchableOpacity key={pos} style={[styles.fmtBtn, newSecondaryPosition === pos && styles.fmtBtnActive]} onPress={() => setNewSecondaryPosition(pos)}><Text style={[styles.fmtBtnText, newSecondaryPosition === pos && styles.fmtBtnTextActive]}>{pos}</Text></TouchableOpacity>
-                  ))}
-                </View>
-
-                <TouchableOpacity style={styles.primaryAuthBtn} onPress={addNewPlayer}><Text style={styles.primaryAuthBtnText}>Create Profile</Text></TouchableOpacity>
-              </ScrollView>
-              <TouchableOpacity style={[styles.cancelBtn, { marginTop: 10 }]} onPress={() => setIsAddPlayerModalOpen(false)}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
-
-      {/* COMMAND MENU SIDEBAR DRAWER */}
-      <Modal visible={isSidebarOpen} transparent={true} animationType="fade">
-        <View style={styles.sidebarOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setIsSidebarOpen(false)} />
-          <View style={styles.sidebarDrawer}>
-            <View style={styles.sidebarHeader}>
-              <Text style={styles.sidebarTitle}>COMMAND MENU</Text>
-              <TouchableOpacity style={styles.sidebarCloseTouchable} onPress={() => setIsSidebarOpen(false)}>
-                <Text style={styles.sidebarCloseBtnText}>✕ Close</Text>
+                />
+              )}
+              <TouchableOpacity style={[styles.cancelBtn, { marginTop: 15 }]} onPress={() => setActiveVideoId(null)}>
+                <Text style={styles.cancelBtnText}>✕ Close Player</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView style={{ flex: 1, marginTop: 10 }} keyboardShouldPersistTaps="handled">
-              {appMode === 'coach' && (
-                <>
-                  {__DEV__ && isSuperUser && (
-                    <>
-                      <TouchableOpacity 
-                        style={[styles.sidebarItem, { borderColor: '#3b82f6' }]} 
-                        onPress={() => {
-                          setIsSidebarOpen(false);
-                          seedFullTeamRoster({
-                            activeTeamId,
-                            activeTeamName: activeTeamObj?.name,
-                            fetchTeamData,
-                            userId: session?.user?.id,
-                            setLoading
-                          });
-                        }}
-                      >
-                        <Text style={[styles.sidebarItemText, { color: '#3b82f6' }]}>🧪 Dev: Seed 16-Player Roster</Text>
-                      </TouchableOpacity>
+          </View>
+        </Modal>
 
-                      <TouchableOpacity 
-                        style={[styles.sidebarItem, { borderColor: '#eab308' }]} 
-                        onPress={() => {
-                          setIsSidebarOpen(false);
-                          seedSeasonStats({
-                            activeTeamId,
-                            activeTeamName: activeTeamObj?.name,
-                            teamSheet,
-                            fetchTeamData,
-                            fetchMatchHistory,
-                            userId: session?.user?.id,
-                            setLoading
-                          });
-                        }}
-                      >
-                        <Text style={[styles.sidebarItemText, { color: '#eab308' }]}>🧪 Dev: Seed Full Season Stats</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity 
-                        style={[styles.sidebarItem, { borderColor: '#a855f7' }]} 
-                        onPress={() => {
-                          setIsSidebarOpen(false);
-                          testOfflineQueueFlow(activeTeamId);
-                        }}
-                      >
-                        <Text style={[styles.sidebarItemText, { color: '#a855f7' }]}>🧪 Dev: Test Offline Queue & Flush</Text>
-                      </TouchableOpacity>
-
-                      <View style={{ marginVertical: 8, height: 1, backgroundColor: '#2E3A44' }} />
-                    </>
-                  )}
-
-                  {(profile?.role === 'coach' || profile?.role === 'assistant' || profile?.role === 'admin' || isSuperUser) && (
-                    <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setIsStaffModalOpen(true); }}>
-                      <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>👥 Manage Team Staff</Text>
-                    </TouchableOpacity>
-                  )}
-
+        <Modal visible={!!drillSelectorMode} transparent={true} animationType="fade">
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setDrillSelectorMode(null)} />
+            <View style={[styles.modalBox, { maxHeight: '70%' }]}>
+              <Text style={styles.modalTitle}>Select Training Phase</Text>
+              <ScrollView style={{ width: '100%' }}>
+                {(drillSelectorMode === 'warmup' ? trainingLibrary.warmups : drillSelectorMode === 'rondo' ? trainingLibrary.rondos : drillSelectorMode === 'ssg' ? trainingLibrary.ssgs : trainingLibrary.drills).map(item => (
                   <TouchableOpacity 
-                    style={[styles.sidebarItem, { borderColor: '#39FF14' }]} 
-                    onPress={() => { setIsSidebarOpen(false); setIsNotesStagingModalOpen(true); }}
+                    key={item.id} 
+                    style={styles.inviteRow} 
+                    onPress={() => {
+                      if (drillSelectorMode === 'warmup') setSelectedWarmup(item);
+                      if (drillSelectorMode === 'rondo') setSelectedDrill1(item);
+                      if (drillSelectorMode === 'drill2') setSelectedDrill2(item);
+                      if (drillSelectorMode === 'ssg') setSelectedSSG(item);
+                      setDrillSelectorMode(null);
+                    }}
                   >
-                    <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>📝 Staged Player Notes Center</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.inviteName}>{item.category ? `[${item.category}] ` : ''}{item.title}</Text>
+                      <Text style={[styles.inviteCodeText, { color: '#94a3b8' }]} numberOfLines={2}>{item.desc || item.description || item.tactical_objective}</Text>
+                    </View>
                   </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setDrillSelectorMode(null)}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
-                  <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setPdfExportStep('type'); setIsPdfExportModalOpen(true); }}>
-                    <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>📄 Export Branded PDF Report</Text>
+        <Modal visible={!!lineupAssignPlayer} transparent={true} animationType="fade">
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setLineupAssignPlayer(null)} />
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Matchday Role: {lineupAssignPlayer?.name || 'Player'}</Text>
+              
+              <Text style={styles.inputLabel}>Assign Pitch Slot (Starter):</Text>
+              <View style={styles.positionGrid}>
+                {(currentAvailablePositions || []).map(pos => (
+                  <TouchableOpacity 
+                    key={pos} 
+                    style={[styles.gridBtn, lineupAssignPlayer?.matchday_position === pos && lineupAssignPlayer?.is_starter && { backgroundColor: '#39FF14' }]} 
+                    onPress={() => assignPlayerRole(lineupAssignPlayer, pos, true)}
+                  >
+                    <Text style={[styles.gridBtnText, lineupAssignPlayer?.matchday_position === pos && lineupAssignPlayer?.is_starter && { color: '#0B0E14' }]}>{pos}</Text>
                   </TouchableOpacity>
+                ))}
+              </View>
 
-                  <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setCurrentTab('training'); }}>
-                    <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>⚽ Training Center</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setCurrentTab('customTraining'); }}>
-                    <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>🎛️ Custom Training Sessions</Text>
-                  </TouchableOpacity>
+              <View style={styles.divider} />
 
-                  <View style={{ marginVertical: 8, height: 1, backgroundColor: '#2E3A44' }} />
+              <TouchableOpacity style={styles.benchBtn} onPress={() => assignPlayerRole(lineupAssignPlayer, 'Bench', false)}>
+                <Text style={styles.benchBtnText}>🔄 Set as Substitute (Bench)</Text>
+              </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.sidebarItem} onPress={() => { setIsSidebarOpen(false); setIsAddPlayerModalOpen(true); }}>
-                    <Text style={styles.sidebarItemText}>➕ Add Player to Squad</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.sidebarItem} onPress={exportMatchdaySummary}>
-                    <Text style={styles.sidebarItemText}>📤 Share Matchday Lineup</Text>
-                  </TouchableOpacity>
+              <TouchableOpacity style={[styles.cancelBtn, { marginTop: 15 }]} onPress={() => setLineupAssignPlayer(null)}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={!!activeLivePlayer && liveEventMode === 'none'} transparent={true} animationType="fade">
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setActiveLivePlayer(null)} />
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Quick Action: {activeLivePlayer?.name || 'Player'}</Text>
+              
+              {getPosCategory(activeLivePlayer?.position) === 'GK' && (
+                <TouchableOpacity style={[styles.liveActionBtn, { width: '100%', marginBottom: 15 }]} onPress={logLiveSave}>
+                  <Text style={styles.liveActionIcon}>🧤</Text>
+                  <Text style={styles.liveActionText}>Log Save</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity style={[styles.liveActionBtn, { width: '100%', borderColor: '#3b82f6', borderWidth: 2 }]} onPress={() => initSubFlow(activeLivePlayer)}>
+                <Text style={styles.liveActionIcon}>🔄</Text>
+                <Text style={[styles.liveActionText, { color: '#3b82f6' }]}>Substitute Player</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.cancelBtn, { marginTop: 15 }]} onPress={() => setActiveLivePlayer(null)}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={!!teamToDelete} transparent={true} animationType="fade">
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => { setTeamToDelete(null); setDeleteTeamConfirmText(''); }} />
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Delete Entire Team</Text>
+              <Text style={[styles.bulletText, { marginBottom: 15, textAlign: 'center' }]}>
+                Type <Text style={{fontWeight: 'bold', color: '#ef4444'}}>delete team</Text> to permanently remove <Text style={{color: '#39FF14', fontWeight: 'bold'}}>{teamToDelete?.name}</Text> and all associated data. This is completely irreversible.
+              </Text>
+              <TextInput 
+                style={[styles.input, { textAlign: 'center', fontWeight: 'bold', fontSize: 18 }]} 
+                placeholder="Type delete team" 
+                placeholderTextColor="#64748b" 
+                value={deleteTeamConfirmText} 
+                onChangeText={setDeleteTeamConfirmText} 
+                autoCapitalize="none"
+              />
+              <TouchableOpacity style={[styles.deleteBtn, { opacity: deleteTeamConfirmText.trim().toLowerCase() === 'delete team' ? 1 : 0.5 }]} onPress={finalizeDeleteTeam}>
+                <Text style={styles.deleteBtnText}>Confirm Delete Team</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setTeamToDelete(null); setDeleteTeamConfirmText(''); }}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={!!playerToDelete} transparent={true} animationType="fade">
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => { setPlayerToDelete(null); setDeleteConfirmText(''); }} />
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Confirm Deletion</Text>
+              <Text style={[styles.bulletText, { marginBottom: 15, textAlign: 'center' }]}>
+                Type <Text style={{fontWeight: 'bold', color: '#ef4444'}}>Delete</Text> to permanently remove {playerToDelete?.name} and all their history. This cannot be undone.
+              </Text>
+              <TextInput 
+                style={[styles.input, { textAlign: 'center', fontWeight: 'bold', fontSize: 18 }]} 
+                placeholder="Type Delete" 
+                placeholderTextColor="#64748b" 
+                value={deleteConfirmText} 
+                onChangeText={setDeleteConfirmText} 
+                autoCapitalize="none"
+              />
+              <TouchableOpacity style={[styles.deleteBtn, { opacity: deleteConfirmText.trim().toLowerCase() === 'delete' ? 1 : 0.5 }]} onPress={finalizeDeletePlayer}>
+                <Text style={styles.deleteBtnText}>Confirm Delete</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setPlayerToDelete(null); setDeleteConfirmText(''); }}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={isAddPlayerModalOpen} transparent={true} animationType="slide">
+          <View style={styles.modalOverlayFull}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setIsAddPlayerModalOpen(false)} />
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' }} pointerEvents="box-none">
+              <View style={[styles.modalBoxFull, { maxHeight: '85%', flexShrink: 1 }]}>
+                <ScrollView style={{ flexGrow: 0 }} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled">
+                  <Text style={styles.modalTitle}>Add Player Quick Setup</Text>
+                  <TextInput style={styles.input} placeholder="Player Full Name" placeholderTextColor="#64748b" value={newPlayerName} onChangeText={setNewPlayerName} />
+                  <TextInput style={styles.input} placeholder="Squad Jersey Number (e.g. 10)" placeholderTextColor="#64748b" keyboardType="numeric" value={newSquadNumber} onChangeText={setNewSquadNumber} />
+                  
+                  <Text style={[styles.inputLabel, { marginTop: 10 }]}>Dominant Foot (Left to Right):</Text>
+                  <View style={styles.footednessContainer}>
+                    <Text style={styles.footLabel}>L</Text>
+                    {[1, 2, 3, 4, 5].map(val => (
+                      <TouchableOpacity 
+                        key={val} 
+                        onPress={() => setNewPlayerFootedness(val)}
+                        style={[styles.footDot, newPlayerFootedness === val && styles.footDotActive]}
+                      />
+                    ))}
+                    <Text style={styles.footLabel}>R</Text>
+                  </View>
+
+                  <Text style={[styles.inputLabel, { marginTop: 10 }]}>Primary Position:</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                    {(profilePositions || []).map(pos => (
+                      <TouchableOpacity key={pos} style={[styles.fmtBtn, newPlayerPosition === pos && styles.fmtBtnActive]} onPress={() => setNewPlayerPosition(pos)}><Text style={[styles.fmtBtnText, newPlayerPosition === pos && styles.fmtBtnTextActive]}>{pos}</Text></TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.inputLabel}>Secondary Position:</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                    {(profileSecondaryPositions || []).map(pos => (
+                      <TouchableOpacity key={pos} style={[styles.fmtBtn, newSecondaryPosition === pos && styles.fmtBtnActive]} onPress={() => setNewSecondaryPosition(pos)}><Text style={[styles.fmtBtnText, newSecondaryPosition === pos && styles.fmtBtnTextActive]}>{pos}</Text></TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <TouchableOpacity style={styles.primaryAuthBtn} onPress={addNewPlayer}><Text style={styles.primaryAuthBtnText}>Create Profile</Text></TouchableOpacity>
+                </ScrollView>
+                <TouchableOpacity style={[styles.cancelBtn, { marginTop: 10 }]} onPress={() => setIsAddPlayerModalOpen(false)}><Text style={styles.cancelBtnText}>Cancel</Text></TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        </Modal>
+
+        {/* COMMAND MENU SIDEBAR DRAWER */}
+        <Modal visible={isSidebarOpen} transparent={true} animationType="fade">
+          <View style={styles.sidebarOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setIsSidebarOpen(false)} />
+            <View style={styles.sidebarDrawer}>
+              <View style={styles.sidebarHeader}>
+                <Text style={styles.sidebarTitle}>COMMAND MENU</Text>
+                <TouchableOpacity style={styles.sidebarCloseTouchable} onPress={() => setIsSidebarOpen(false)}>
+                  <Text style={styles.sidebarCloseBtnText}>✕ Close</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={{ flex: 1, marginTop: 10 }} keyboardShouldPersistTaps="handled">
+                {appMode === 'coach' && (
+                  <>
+                    {__DEV__ && isSuperUser && (
+                      <>
+                        <TouchableOpacity 
+                          style={[styles.sidebarItem, { borderColor: '#3b82f6' }]} 
+                          onPress={() => {
+                            setIsSidebarOpen(false);
+                            seedFullTeamRoster({
+                              activeTeamId,
+                              activeTeamName: activeTeamObj?.name,
+                              fetchTeamData,
+                              userId: session?.user?.id,
+                              setLoading
+                            });
+                          }}
+                        >
+                          <Text style={[styles.sidebarItemText, { color: '#3b82f6' }]}>🧪 Dev: Seed 16-Player Roster</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity 
+                          style={[styles.sidebarItem, { borderColor: '#eab308' }]} 
+                          onPress={() => {
+                            setIsSidebarOpen(false);
+                            seedSeasonStats({
+                              activeTeamId,
+                              activeTeamName: activeTeamObj?.name,
+                              teamSheet,
+                              fetchTeamData,
+                              fetchMatchHistory,
+                              userId: session?.user?.id,
+                              setLoading
+                            });
+                          }}
+                        >
+                          <Text style={[styles.sidebarItemText, { color: '#eab308' }]}>🧪 Dev: Seed Full Season Stats</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity 
+                          style={[styles.sidebarItem, { borderColor: '#a855f7' }]} 
+                          onPress={() => {
+                            setIsSidebarOpen(false);
+                            testOfflineQueueFlow(activeTeamId);
+                          }}
+                        >
+                          <Text style={[styles.sidebarItemText, { color: '#a855f7' }]}>🧪 Dev: Test Offline Queue & Flush</Text>
+                        </TouchableOpacity>
+
+                        <View style={{ marginVertical: 8, height: 1, backgroundColor: '#2E3A44' }} />
+                      </>
+                    )}
+
+                    {(isStaffForActiveTeam || isSuperUser) && (
+                      <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setIsStaffModalOpen(true); }}>
+                        <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>👥 Manage Team Staff</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    <TouchableOpacity 
+                      style={[styles.sidebarItem, { borderColor: '#39FF14' }]} 
+                      onPress={() => { setIsSidebarOpen(false); setIsNotesStagingModalOpen(true); }}
+                    >
+                      <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>📝 Staged Player Notes Center</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setPdfExportStep('type'); setIsPdfExportModalOpen(true); }}>
+                      <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>📄 Export Branded PDF Report</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setCurrentTab('training'); }}>
+                      <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>⚽ Training Center</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14' }]} onPress={() => { setIsSidebarOpen(false); setCurrentTab('customTraining'); }}>
+                      <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>🎛️ Custom Training Sessions</Text>
+                    </TouchableOpacity>
+
+                    <View style={{ marginVertical: 8, height: 1, backgroundColor: '#2E3A44' }} />
+
+                    <TouchableOpacity style={styles.sidebarItem} onPress={() => { setIsSidebarOpen(false); setIsAddPlayerModalOpen(true); }}>
+                      <Text style={styles.sidebarItemText}>➕ Add Player to Squad</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.sidebarItem} onPress={exportMatchdaySummary}>
+                      <Text style={styles.sidebarItemText}>📤 Share Matchday Lineup</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.sidebarItem} onPress={() => { setIsSidebarOpen(false); setIsInviteModalOpen(true); }}>
+                      <Text style={styles.sidebarItemText}>🔑 Manage Invite Codes</Text>
+                    </TouchableOpacity>
+
+                    <View style={{ marginVertical: 8, height: 1, backgroundColor: '#2E3A44' }} />
+                  </>
+                )}
+
+                <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#3b82f6' }]} onPress={() => { setIsSidebarOpen(false); setIsFaWebviewOpen(true); }}>
+                  <Text style={[styles.sidebarItemText, { color: '#3b82f6' }]}>🏆 FA League Table</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#3b82f6' }]} onPress={() => { setIsSidebarOpen(false); setIsMatchArchiveOpen(true); }}>
+                  <Text style={[styles.sidebarItemText, { color: '#3b82f6' }]}>📜 Past Match Reports</Text>
+                </TouchableOpacity>
+
+                {appMode !== 'coach' && (
                   <TouchableOpacity style={styles.sidebarItem} onPress={() => { setIsSidebarOpen(false); setIsInviteModalOpen(true); }}>
                     <Text style={styles.sidebarItemText}>🔑 Manage Invite Codes</Text>
                   </TouchableOpacity>
+                )}
 
-                  <View style={{ marginVertical: 8, height: 1, backgroundColor: '#2E3A44' }} />
-                </>
-              )}
-
-              <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#3b82f6' }]} onPress={() => { setIsSidebarOpen(false); setIsFaWebviewOpen(true); }}>
-                <Text style={[styles.sidebarItemText, { color: '#3b82f6' }]}>🏆 FA League Table</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#3b82f6' }]} onPress={() => { setIsSidebarOpen(false); setIsMatchArchiveOpen(true); }}>
-                <Text style={[styles.sidebarItemText, { color: '#3b82f6' }]}>📜 Past Match Reports</Text>
-              </TouchableOpacity>
-
-              {appMode !== 'coach' && (
-                <TouchableOpacity style={styles.sidebarItem} onPress={() => { setIsSidebarOpen(false); setIsInviteModalOpen(true); }}>
-                  <Text style={styles.sidebarItemText}>🔑 Share Invite Codes</Text>
-                </TouchableOpacity>
-              )}
-
-              {appMode === 'coach' && (
-                <>
-                  <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#3b82f6' }]} onPress={() => { setIsSidebarOpen(false); setIsSeasonArchiveOpen(true); }}>
-                    <Text style={[styles.sidebarItemText, { color: '#3b82f6' }]}>📁 Past Season Reports</Text>
-                  </TouchableOpacity>
-
-                  <View style={{ marginVertical: 12, height: 1, backgroundColor: '#2E3A44' }} />
-
-                  <Text style={styles.inputLabel}>Team Badge / Logo Image URL:</Text>
-                  <TextInput 
-                    style={styles.input} 
-                    placeholder="Paste Image URL (PNG/JPG)..." 
-                    placeholderTextColor="#64748b" 
-                    value={teamLogoUrl} 
-                    onChangeText={setTeamLogoUrl} 
-                    autoCapitalize="none"
-                  />
-                  <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#39FF14', marginBottom: 15 }]} onPress={saveTeamLogoUrl}>
-                    <Text style={[styles.primaryAuthBtnText, { color: '#0B0E14' }]}>Save Team Logo</Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.inputLabel}>FA League Table Web Link:</Text>
-                  <TextInput 
-                    style={styles.input} 
-                    placeholder="Paste FA Full-Time Table Link..." 
-                    placeholderTextColor="#64748b" 
-                    value={faLeagueUrl} 
-                    onChangeText={setFaLeagueUrl} 
-                    autoCapitalize="none"
-                  />
-                  <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#3b82f6', marginBottom: 15 }]} onPress={saveFaLeagueUrl}>
-                    <Text style={[styles.primaryAuthBtnText, { color: '#FFFFFF' }]}>Save League URL</Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.inputLabel}>Opposition Scouting Notes:</Text>
-                  <TextInput 
-                    style={[styles.input, { height: 80, textAlignVertical: 'top' }]} 
-                    placeholder="Enter opponent notes..." 
-                    placeholderTextColor="#64748b" 
-                    multiline 
-                    value={scoutNotesInput || ''} 
-                    onChangeText={setScoutNotesInput} 
-                  />
-                  <TouchableOpacity style={styles.primaryAuthBtn} onPress={saveMatchNotes} disabled={isSavingNotes}>
-                    <Text style={styles.primaryAuthBtnText}>{isSavingNotes ? "Saving..." : "Publish Notes"}</Text>
-                  </TouchableOpacity>
-
-                  <View style={{ marginVertical: 12, height: 1, backgroundColor: '#2E3A44' }} />
-
-                  <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#ef4444' }]} onPress={() => { setIsSidebarOpen(false); setIsSeasonResetModalOpen(true); }}>
-                    <Text style={[styles.sidebarItemText, { color: '#ef4444' }]}>🎆 Start New Season</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14', marginTop: 5 }]} onPress={() => { setIsSidebarOpen(false); setIsCreateTeamModalOpen(true); }}>
-                    <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>➕ Create New Team</Text>
-                  </TouchableOpacity>
-
-                  {(isSuperUser || profile?.role === 'coach') && (
-                    <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#ef4444', marginTop: 5, marginBottom: 20 }]} onPress={() => { 
-                      setIsSidebarOpen(false); 
-                      setTimeout(() => {
-                        const currentTeam = myTeams.find(t => t.id === activeTeamId);
-                        setTeamToDelete(currentTeam);
-                        setDeleteTeamConfirmText('');
-                      }, 350); 
-                    }}>
-                      <Text style={[styles.sidebarItemText, { color: '#ef4444' }]}>🗑️ Delete Current Team</Text>
+                {appMode === 'coach' && (
+                  <>
+                    <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#3b82f6' }]} onPress={() => { setIsSidebarOpen(false); setIsSeasonArchiveOpen(true); }}>
+                      <Text style={[styles.sidebarItemText, { color: '#3b82f6' }]}>📁 Past Season Reports</Text>
                     </TouchableOpacity>
-                  )}
 
-                  <View style={{ height: 30 }} />
-                </>
-              )}
-            </ScrollView>
+                    <View style={{ marginVertical: 12, height: 1, backgroundColor: '#2E3A44' }} />
+
+                    <Text style={styles.inputLabel}>Team Badge / Logo Image URL:</Text>
+                    <TextInput 
+                      style={styles.input} 
+                      placeholder="Paste Image URL (PNG/JPG)..." 
+                      placeholderTextColor="#64748b" 
+                      value={teamLogoUrl} 
+                      onChangeText={setTeamLogoUrl} 
+                      autoCapitalize="none"
+                    />
+                    <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#39FF14', marginBottom: 15 }]} onPress={saveTeamLogoUrl}>
+                      <Text style={[styles.primaryAuthBtnText, { color: '#0B0E14' }]}>Save Team Logo</Text>
+                    </TouchableOpacity>
+
+                    <Text style={styles.inputLabel}>FA League Table Web Link:</Text>
+                    <TextInput 
+                      style={styles.input} 
+                      placeholder="Paste FA Full-Time Table Link..." 
+                      placeholderTextColor="#64748b" 
+                      value={faLeagueUrl} 
+                      onChangeText={setFaLeagueUrl} 
+                      autoCapitalize="none"
+                    />
+                    <TouchableOpacity style={[styles.primaryAuthBtn, { backgroundColor: '#3b82f6', marginBottom: 15 }]} onPress={saveFaLeagueUrl}>
+                      <Text style={[styles.primaryAuthBtnText, { color: '#FFFFFF' }]}>Save League URL</Text>
+                    </TouchableOpacity>
+
+                    <Text style={styles.inputLabel}>Opposition Scouting Notes:</Text>
+                    <TextInput 
+                      style={[styles.input, { height: 80, textAlignVertical: 'top' }]} 
+                      placeholder="Enter opponent notes..." 
+                      placeholderTextColor="#64748b" 
+                      multiline 
+                      value={scoutNotesInput || ''} 
+                      onChangeText={setScoutNotesInput} 
+                    />
+                    <TouchableOpacity style={styles.primaryAuthBtn} onPress={saveMatchNotes} disabled={isSavingNotes}>
+                      <Text style={styles.primaryAuthBtnText}>{isSavingNotes ? "Saving..." : "Publish Notes"}</Text>
+                    </TouchableOpacity>
+
+                    <View style={{ marginVertical: 12, height: 1, backgroundColor: '#2E3A44' }} />
+
+                    <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#ef4444' }]} onPress={() => { setIsSidebarOpen(false); setIsSeasonResetModalOpen(true); }}>
+                      <Text style={[styles.sidebarItemText, { color: '#ef4444' }]}>🎆 Start New Season</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#39FF14', marginTop: 5 }]} onPress={() => { setIsSidebarOpen(false); setIsCreateTeamModalOpen(true); }}>
+                      <Text style={[styles.sidebarItemText, { color: '#39FF14' }]}>➕ Create New Team</Text>
+                    </TouchableOpacity>
+
+                    {(isSuperUser || profile?.role === 'coach') && (
+                      <TouchableOpacity style={[styles.sidebarItem, { borderColor: '#ef4444', marginTop: 5, marginBottom: 20 }]} onPress={() => { 
+                        setIsSidebarOpen(false); 
+                        setTimeout(() => {
+                          const currentTeam = myTeams.find(t => t.id === activeTeamId);
+                          setTeamToDelete(currentTeam);
+                          setDeleteTeamConfirmText('');
+                        }, 350); 
+                      }}>
+                        <Text style={[styles.sidebarItemText, { color: '#ef4444' }]}>🗑️ Delete Current Team</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    <View style={{ height: 30 }} />
+                  </>
+                )}
+              </ScrollView>
+            </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-    </SafeAreaView>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 

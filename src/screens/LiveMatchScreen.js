@@ -10,6 +10,36 @@ import {
 } from 'react-native';
 import { useMatchdayStore } from '../store/useMatchdayStore';
 
+// Positional hierarchy ranking: ST (Top) -> Midfield -> Defense -> GK (Bottom)
+const getTacticalRank = (posStr) => {
+  if (!posStr) return 99;
+  const p = String(posStr).toUpperCase().trim();
+
+  // Attack
+  if (['ST', 'CF', 'LS', 'RS'].some(x => p === x || p.startsWith(x))) return 10;
+  if (['CAM', 'LAM', 'RAM', 'CAM/CF'].some(x => p === x || p.includes('CAM'))) return 11;
+  if (['LW', 'LF', 'LF/LW/LM'].some(x => p === x || p.includes('LW') || p.includes('LF'))) return 20;
+  if (['RW', 'RF', 'RF/RW/RM'].some(x => p === x || p.includes('RW') || p.includes('RF'))) return 21;
+
+  // Midfield
+  if (['CM', 'LCM', 'LDM', 'CDM'].some(x => p === x || p === 'LDM' || p === 'LCM')) return 30;
+  if (['RCM', 'RDM'].some(x => p === x || p === 'RDM' || p === 'RCM')) return 31;
+  if (['LM'].some(x => p === x)) return 32;
+  if (['RM'].some(x => p === x)) return 33;
+
+  // Defense
+  if (['LB', 'LWB', 'LB/LWB'].some(x => p === x || p.includes('LB') || p.includes('LWB'))) return 40;
+  if (['RB', 'RWB', 'RB/RWB'].some(x => p === x || p.includes('RB') || p.includes('RWB'))) return 41;
+  if (['LCB'].some(x => p === x)) return 50;
+  if (['RCB'].some(x => p === x)) return 51;
+  if (['CB'].some(x => p === x || p.includes('CB'))) return 52;
+
+  // GK
+  if (['GK', 'SGK', 'GK/SGK'].some(x => p === x || p.includes('GK'))) return 90;
+
+  return 80;
+};
+
 export default function LiveMatchScreen({
   appMode,
   handlePhaseChange,
@@ -35,7 +65,6 @@ export default function LiveMatchScreen({
   const pendingOfflineCount = useMatchdayStore((state) => state.pendingOfflineCount);
   const setPendingOfflineCount = useMatchdayStore((state) => state.setPendingOfflineCount);
 
-  // Match State Verification
   const isGameActive = matchPhase === '1ST HALF' || matchPhase === '2ND HALF';
   const isPreMatch = matchPhase === 'PRE-MATCH';
   const isHalfTime = matchPhase === 'HALF-TIME';
@@ -71,6 +100,17 @@ export default function LiveMatchScreen({
     const queue = await getOfflineQueue();
     setPendingOfflineCount(queue.length);
   };
+
+  // Group on-pitch into Outfield pairs + Goalkeeper bottom button
+  const outfieldStarters = [...onPitchPlayers]
+    .filter(p => !['GK', 'SGK', 'GK/SGK'].some(g => String(p.matchday_position || p.position).toUpperCase().includes(g)))
+    .sort((a, b) => getTacticalRank(a.matchday_position || a.position) - getTacticalRank(b.matchday_position || b.position));
+
+  const gkStarters = [...onPitchPlayers]
+    .filter(p => ['GK', 'SGK', 'GK/SGK'].some(g => String(p.matchday_position || p.position).toUpperCase().includes(g)));
+
+  const sortedBenchSubs = [...subs]
+    .sort((a, b) => getTacticalRank(a.position) - getTacticalRank(b.position));
 
   return (
     <View style={{ flex: 1, backgroundColor: '#0B0E14' }}>
@@ -182,7 +222,7 @@ export default function LiveMatchScreen({
         </TouchableOpacity>
       )}
 
-      {/* ACTION BUTTONS (LOCKED OUTSIDE ACTIVE PLAY) */}
+      {/* TOP ACTION BUTTONS (LOCKED OUTSIDE ACTIVE PLAY) */}
       {appMode === 'coach' && (
         <View style={styles.liveActionHeader}>
           {/* LOG GOAL */}
@@ -232,7 +272,7 @@ export default function LiveMatchScreen({
         </View>
       )}
 
-      {/* LIVE BROADCAST TICKER */}
+      {/* LIVE EVENT TICKER STREAM */}
       <View style={styles.tickerContainer}>
         {(liveTicker || []).length === 0 ? (
           <Text style={[styles.bulletText, { textAlign: 'center', marginTop: 15 }]}>
@@ -254,7 +294,7 @@ export default function LiveMatchScreen({
         )}
       </View>
 
-      {/* PITCH ROSTER & BENCH (SUBSTITUTIONS) */}
+      {/* PITCH ROSTER & BENCH (TACTICALLY ORGANIZED) */}
       {appMode === 'coach' && (
         <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.rosterHeaderRow}>
@@ -263,65 +303,103 @@ export default function LiveMatchScreen({
               {isGameActive ? 'Tap player to substitute' : 'Locked outside active play'}
             </Text>
           </View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-            {(onPitchPlayers || []).length === 0 ? <Text style={{ color: '#64748b' }}>No starters selected.</Text> : null}
-            {(onPitchPlayers || []).map((p) => {
-              if (!p) return null;
-              return (
-                <TouchableOpacity 
-                  key={p.id} 
-                  style={[
-                    styles.livePlayerCard,
-                    !isGameActive && { opacity: 0.45, borderColor: '#2E3A44' }
-                  ]} 
-                  onPress={() => {
-                    if (!isGameActive) {
-                      handleDisabledAction();
-                      return;
-                    }
-                    setActiveLivePlayer(p);
-                  }}
-                >
-                  <Text style={[styles.livePlayerPos, !isGameActive && { color: '#64748b' }]}>
-                    {p.matchday_position || 'N/A'}
-                  </Text>
-                  <Text style={styles.livePlayerName} numberOfLines={1}>
-                    #{p.squad_number} {p.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+
+          {/* OUTFIELD PAIRS (2-COLUMN BALANCED GRID) */}
+          <View style={styles.outfieldGrid}>
+            {outfieldStarters.length === 0 && gkStarters.length === 0 ? (
+              <Text style={{ color: '#64748b' }}>No starters selected.</Text>
+            ) : null}
+
+            {outfieldStarters.map((p) => (
+              <TouchableOpacity 
+                key={p.id} 
+                style={[
+                  styles.liveOutfieldCard,
+                  !isGameActive && { opacity: 0.45, borderColor: '#2E3A44' }
+                ]} 
+                onPress={() => {
+                  if (!isGameActive) {
+                    handleDisabledAction();
+                    return;
+                  }
+                  setActiveLivePlayer(p);
+                }}
+              >
+                <View style={styles.cardHeader}>
+                  <Text style={styles.livePlayerPos}>{p.matchday_position || p.position}</Text>
+                  <Text style={styles.jerseyNum}>#{p.squad_number}</Text>
+                </View>
+                <Text style={styles.livePlayerName} numberOfLines={1}>{p.name}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
-          <Text style={[styles.sectionHeaderModal, { marginTop: 30 }]}>BENCH (SUBS)</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: 40 }}>
-            {(subs || []).length === 0 ? <Text style={{ color: '#64748b' }}>Bench is empty.</Text> : null}
-            {(subs || []).map((p) => {
-              if (!p) return null;
-              return (
-                <TouchableOpacity 
-                  key={p.id} 
-                  style={[
-                    styles.livePlayerCard, 
-                    { borderColor: '#2E3A44', backgroundColor: '#0B0E14' },
-                    !isGameActive && { opacity: 0.45 }
-                  ]} 
-                  onPress={() => {
-                    if (!isGameActive) {
-                      handleDisabledAction();
-                      return;
-                    }
-                    setActiveLivePlayer(p);
-                  }}
-                >
-                  <Text style={[styles.livePlayerPos, { color: '#94a3b8' }]}>{p.matchday_position || 'N/A'}</Text>
-                  <Text style={[styles.livePlayerName, { color: '#cbd5e1' }]} numberOfLines={1}>
-                    #{p.squad_number} {p.name}
+          {/* GOALKEEPER FULL-WIDTH BOTTOM BUTTON */}
+          {gkStarters.map((p) => (
+            <TouchableOpacity 
+              key={p.id} 
+              style={[
+                styles.liveGkCard,
+                !isGameActive && { opacity: 0.45, borderColor: '#2E3A44' }
+              ]} 
+              onPress={() => {
+                if (!isGameActive) {
+                  handleDisabledAction();
+                  return;
+                }
+                setActiveLivePlayer(p);
+              }}
+            >
+              <View style={styles.gkInnerRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={styles.gkBadge}>🧤 GOALKEEPER</Text>
+                  <Text style={styles.jerseyNum}>#{p.squad_number}</Text>
+                  <Text style={styles.livePlayerName} numberOfLines={1}>{p.name}</Text>
+                </View>
+                <Text style={{ color: '#39FF14', fontSize: 11, fontWeight: 'bold' }}>
+                  {isGameActive ? 'Tap for Quick Action ➔' : 'Locked'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+
+          {/* BENCH SUBS (TACTICALLY SORTED: ATTACK DOWN TO GK) */}
+          <Text style={[styles.sectionHeaderModal, { marginTop: 24 }]}>BENCH (SUBS)</Text>
+          <View style={styles.outfieldGrid}>
+            {sortedBenchSubs.length === 0 ? (
+              <Text style={{ color: '#64748b' }}>Bench is empty.</Text>
+            ) : null}
+
+            {sortedBenchSubs.map((p) => (
+              <TouchableOpacity 
+                key={p.id} 
+                style={[
+                  styles.liveOutfieldCard, 
+                  { borderColor: '#2E3A44', backgroundColor: '#0B0E14' },
+                  !isGameActive && { opacity: 0.45 }
+                ]} 
+                onPress={() => {
+                  if (!isGameActive) {
+                    handleDisabledAction();
+                    return;
+                  }
+                  setActiveLivePlayer(p);
+                }}
+              >
+                <View style={styles.cardHeader}>
+                  <Text style={[styles.livePlayerPos, { color: '#94a3b8' }]}>
+                    {p.matchday_position || p.position}
                   </Text>
-                </TouchableOpacity>
-              );
-            })}
+                  <Text style={styles.jerseyNum}>#{p.squad_number}</Text>
+                </View>
+                <Text style={[styles.livePlayerName, { color: '#cbd5e1' }]} numberOfLines={1}>
+                  {p.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
+
+          <View style={{ height: 40 }} />
         </ScrollView>
       )}
     </View>
@@ -365,7 +443,13 @@ const styles = StyleSheet.create({
   rosterHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   sectionHeaderModal: { color: '#39FF14', fontSize: 13, fontWeight: 'bold', textTransform: 'uppercase' },
   rosterHint: { color: '#64748b', fontSize: 11 },
-  livePlayerCard: { backgroundColor: '#1A1F26', padding: 15, borderRadius: 10, minWidth: '45%', alignItems: 'center', flex: 1, borderWidth: 1, borderColor: '#39FF14' },
-  livePlayerPos: { color: '#39FF14', fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
-  livePlayerName: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' }
+  outfieldGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8 },
+  liveOutfieldCard: { backgroundColor: '#1A1F26', padding: 12, borderRadius: 10, width: '48.5%', borderWidth: 1, borderColor: '#39FF14' },
+  liveGkCard: { backgroundColor: '#1A1F26', padding: 14, borderRadius: 10, width: '100%', borderWidth: 1.5, borderColor: '#39FF14', marginTop: 8 },
+  gkInnerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  gkBadge: { backgroundColor: '#39FF14', color: '#0B0E14', fontSize: 10, fontWeight: '900', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  livePlayerPos: { color: '#39FF14', fontSize: 12, fontWeight: 'bold' },
+  jerseyNum: { color: '#94a3b8', fontSize: 11, fontWeight: 'bold' },
+  livePlayerName: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' }
 });
