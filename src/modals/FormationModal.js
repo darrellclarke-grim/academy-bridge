@@ -137,6 +137,23 @@ export default function FormationModal({
       }
     }
 
+    // 3. BROADCAST REAL-TIME SYNC TO PEERS
+    if (activeTeamId) {
+      try {
+        const channel = supabase.channel(`team-realtime-${activeTeamId}`);
+        await channel.send({
+          type: 'broadcast',
+          event: 'match_state_sync',
+          payload: {
+            formationChanged: true,
+            newFormation
+          }
+        });
+      } catch (err) {
+        console.warn("Peer broadcast notice:", err?.message);
+      }
+    }
+
     onClose();
   };
 

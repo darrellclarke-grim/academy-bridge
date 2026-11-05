@@ -358,11 +358,19 @@ export default function App() {
     const cleanCode = inputCode.trim().toUpperCase();
     setLoading(true);
 
+    // Helper: If user is stuck in onboarding, flip their profile to configured
+    const markRoleConfigured = async (roleType) => {
+      if (profile && !profile.role_configured) {
+        await supabase.from('profiles').update({ role_configured: true, role: roleType }).eq('id', session.user.id);
+      }
+    };
+
     try {
       const { data: headTeam } = await supabase.from('teams').select('*').eq('invite_code', cleanCode).maybeSingle();
       if (headTeam) {
         await supabase.from('team_staff').upsert([{ team_id: headTeam.id, user_id: session.user.id, role: 'coach' }], { onConflict: 'team_id,user_id' });
         setActiveTeamId(headTeam.id);
+        await markRoleConfigured('coach');
         await fetchUserProfile(session.user.id);
         Alert.alert("Team Linked! ⚽", `You have successfully joined ${headTeam.name} as Head Coach.`);
         return true;
@@ -372,6 +380,7 @@ export default function App() {
       if (staffTeam) {
         await supabase.from('team_staff').upsert([{ team_id: staffTeam.id, user_id: session.user.id, role: 'assistant' }], { onConflict: 'team_id,user_id' });
         setActiveTeamId(staffTeam.id);
+        await markRoleConfigured('assistant');
         await fetchUserProfile(session.user.id);
         Alert.alert("Team Linked! ⚽", `You have successfully joined ${staffTeam.name} as Assistant Coach.`);
         return true;
@@ -381,6 +390,7 @@ export default function App() {
       if (adminTeam) {
         await supabase.from('team_staff').upsert([{ team_id: adminTeam.id, user_id: session.user.id, role: 'admin' }], { onConflict: 'team_id,user_id' });
         setActiveTeamId(adminTeam.id);
+        await markRoleConfigured('admin');
         await fetchUserProfile(session.user.id);
         Alert.alert("Team Linked! 📋", `You have successfully joined ${adminTeam.name} as Team Administrator.`);
         return true;
@@ -391,6 +401,7 @@ export default function App() {
         await supabase.from('parent_players').upsert([{ player_id: player.id, parent_id: session.user.id, is_primary: true }], { onConflict: 'player_id,parent_id' });
         if (player.team_id) setActiveTeamId(player.team_id);
         setMyChildId(player.id);
+        await markRoleConfigured('parent');
         await fetchUserProfile(session.user.id);
         const teamTitle = player.teams?.name || 'Squad';
         Alert.alert("Player Linked! 🌟", `Successfully linked ${player.name} (${teamTitle}) to your account.`);
@@ -400,6 +411,7 @@ export default function App() {
       const { data: fanTeam } = await supabase.from('teams').select('*').eq('fan_code', cleanCode).maybeSingle();
       if (fanTeam) {
         setActiveTeamId(fanTeam.id);
+        await markRoleConfigured('fan');
         await fetchUserProfile(session.user.id);
         Alert.alert("Joined as Fan! 📣", `You are now following ${fanTeam.name}.`);
         return true;
@@ -830,6 +842,7 @@ export default function App() {
       setLoading(false);
     }
   }
+
   useEffect(() => {
     let initialMount = true;
     initAudioSession();
@@ -956,6 +969,8 @@ export default function App() {
       )
       .on('broadcast', { event: 'match_state_sync' }, ({ payload }) => {
         if (!payload) return;
+        if (payload.formationChanged) setActiveFormation(payload.newFormation);
+        if (payload.lineupAdjusted) fetchTeamData(session?.user?.id, activeTeamId);
         if (payload.matchPhase !== undefined) setMatchPhase(payload.matchPhase);
         if (payload.opponentName !== undefined) setOpponentName(payload.opponentName);
         if (payload.matchType !== undefined) setMatchType(payload.matchType);
@@ -1307,7 +1322,6 @@ export default function App() {
       ]);
     }
   };
-
   // 📋 BATCH RSVP CONTROLLER (ADD ALL / REMOVE ALL)
   async function batchToggleRSVP() {
     if (!activeTeamId || !teamSheet || teamSheet.length === 0) return;
@@ -1940,8 +1954,8 @@ export default function App() {
       name: teamName, 
       invite_code: inviteCode, 
       staff_code: staffCode, 
-      admin_code: adminCode,
-      fan_code: fanCode,
+      admin_code: adminCode, 
+      fan_code: fanCode, 
       created_by: session.user.id, 
       age_group: teamAgeGroup 
     }]).select();
@@ -1980,8 +1994,8 @@ export default function App() {
       name: newTeamName, 
       invite_code: inviteCode, 
       staff_code: staffCode, 
-      admin_code: adminCode,
-      fan_code: fanCode,
+      admin_code: adminCode, 
+      fan_code: fanCode, 
       created_by: session.user.id, 
       age_group: newTeamAgeGroup 
     }]).select();
@@ -2444,7 +2458,6 @@ export default function App() {
       Alert.alert("PDF Export Error", err?.message || 'Could not export archived PDF.');
     }
   };
-
   const SUPABASE_LOGO_URL = 'https://jnogngcywfgitzryooig.supabase.co/storage/v1/object/public/app-assets/Tactical%20Engine%20Logo.png';
   if (loading) {
     return (
@@ -2571,14 +2584,46 @@ export default function App() {
                   <>
                     <Text style={[styles.inputLabel, { marginBottom: 10, textAlign: 'center' }]}>What is your role on this team?</Text>
                     
-                    <TouchableOpacity style={[styles.wizardOptionBtn, selectedCreationRole === 'coach' && { borderColor: '#39FF14' }]} onPress={() => setSelectedCreationRole('coach')}>
-                      <Text style={styles.wizardOptionTitle}>👑 Head Coach</Text>
+                    <TouchableOpacity 
+                      style={[
+                        styles.wizardOptionBtn, 
+                        selectedCreationRole === 'coach' 
+                          ? { borderColor: '#39FF14', backgroundColor: 'rgba(57, 255, 20, 0.08)' } 
+                          : { opacity: 0.45, borderColor: '#2E3A44' }
+                      ]} 
+                      onPress={() => setSelectedCreationRole('coach')}
+                    >
+                      <Text style={[styles.wizardOptionTitle, selectedCreationRole !== 'coach' && { color: '#64748b' }]}>
+                        👑 Head Coach {selectedCreationRole === 'coach' ? '✓' : ''}
+                      </Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.wizardOptionBtn, selectedCreationRole === 'assistant' && { borderColor: '#39FF14' }]} onPress={() => setSelectedCreationRole('assistant')}>
-                      <Text style={styles.wizardOptionTitle}>⚽ Assistant Coach</Text>
+                    
+                    <TouchableOpacity 
+                      style={[
+                        styles.wizardOptionBtn, 
+                        selectedCreationRole === 'assistant' 
+                          ? { borderColor: '#39FF14', backgroundColor: 'rgba(57, 255, 20, 0.08)' } 
+                          : { opacity: 0.45, borderColor: '#2E3A44' }
+                      ]} 
+                      onPress={() => setSelectedCreationRole('assistant')}
+                    >
+                      <Text style={[styles.wizardOptionTitle, selectedCreationRole !== 'assistant' && { color: '#64748b' }]}>
+                        ⚽ Assistant Coach {selectedCreationRole === 'assistant' ? '✓' : ''}
+                      </Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.wizardOptionBtn, selectedCreationRole === 'admin' && { borderColor: '#39FF14' }]} onPress={() => setSelectedCreationRole('admin')}>
-                      <Text style={styles.wizardOptionTitle}>📋 Team Administrator</Text>
+                    
+                    <TouchableOpacity 
+                      style={[
+                        styles.wizardOptionBtn, 
+                        selectedCreationRole === 'admin' 
+                          ? { borderColor: '#39FF14', backgroundColor: 'rgba(57, 255, 20, 0.08)' } 
+                          : { opacity: 0.45, borderColor: '#2E3A44' }
+                      ]} 
+                      onPress={() => setSelectedCreationRole('admin')}
+                    >
+                      <Text style={[styles.wizardOptionTitle, selectedCreationRole !== 'admin' && { color: '#64748b' }]}>
+                        📋 Team Administrator {selectedCreationRole === 'admin' ? '✓' : ''}
+                      </Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.primaryAuthBtn} onPress={() => setOnboardingStep('coach_setup')}>
@@ -2971,14 +3016,17 @@ export default function App() {
           )}
         </View>
 
-        {/* 📁 EXECUTIVE SEASON VAULT MODAL */}
+        {/* 📁 EXECUTIVE SEASON VAULT MODAL (LOWERED CLOSE BUTTON FOR SAFE AREA) */}
         <Modal visible={isSeasonArchiveOpen} transparent={true} animationType="slide">
           <View style={styles.modalOverlayFull}>
-            <SafeAreaView style={{ flex: 1, width: '100%' }}>
+            <SafeAreaView style={{ flex: 1, width: '100%', backgroundColor: '#0B0E14' }} edges={['top', 'bottom']}>
               
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#2E3A44', backgroundColor: '#0B0E14' }}>
+              <View style={[styles.safeModalHeader, { borderBottomWidth: 1, borderBottomColor: '#2E3A44', backgroundColor: '#0B0E14' }]}>
                 <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>📁 Season Vault Archive</Text>
-                <TouchableOpacity onPress={() => { setViewingSeasonReport(null); setIsSeasonArchiveOpen(false); }} style={{ backgroundColor: '#1A1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 }}>
+                <TouchableOpacity 
+                  onPress={() => { setViewingSeasonReport(null); setIsSeasonArchiveOpen(false); }} 
+                  style={styles.modalClosePill}
+                >
                   <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>Close</Text>
                 </TouchableOpacity>
               </View>
@@ -3326,11 +3374,12 @@ export default function App() {
           generatePlayerReportCard={generatePlayerReportCard}
         />
 
+        {/* 🏆 FA LEAGUE TABLE MODAL (LOWERED CLOSE BUTTON FOR SAFE AREA) */}
         <Modal visible={isFaWebviewOpen} animationType="slide">
-          <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0E14' }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }}>
+          <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0E14' }} edges={['top', 'bottom']}>
+            <View style={[styles.safeModalHeader, { borderBottomWidth: 1, borderBottomColor: '#2E3A44' }]}>
               <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>🏆 FA League Table</Text>
-              <TouchableOpacity onPress={() => setIsFaWebviewOpen(false)} style={{ backgroundColor: '#1A1F26', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8 }}>
+              <TouchableOpacity onPress={() => setIsFaWebviewOpen(false)} style={styles.modalClosePill}>
                 <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>Close</Text>
               </TouchableOpacity>
             </View>
@@ -3812,7 +3861,7 @@ const styles = StyleSheet.create({
   sidebarItem: { backgroundColor: '#0B0E14', padding: 15, borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#2E3A44' },
   sidebarItemText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
 
-  wizardOptionBtn: { backgroundColor: '#1A1F26', padding: 18, borderRadius: 10, borderWidth: 1, borderColor: '#39FF14', marginBottom: 15 },
+  wizardOptionBtn: { backgroundColor: '#1A1F26', padding: 18, borderRadius: 10, borderWidth: 1.5, borderColor: '#39FF14', marginBottom: 15 },
   wizardOptionTitle: { color: '#39FF14', fontWeight: 'bold', fontSize: 16, marginBottom: 5 },
   wizardOptionSub: { color: '#94a3b8', fontSize: 12, lineHeight: 18 },
   
@@ -3875,6 +3924,24 @@ const styles = StyleSheet.create({
   cancelBtn: { padding: 10, alignItems: 'center', width: '100%' },
   cancelBtnText: { color: '#94a3b8', fontSize: 14 },
 
+  safeModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 22 : 14,
+    paddingBottom: 14,
+    backgroundColor: '#0B0E14'
+  },
+  modalClosePill: {
+    backgroundColor: '#1A1F26',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2E3A44'
+  },
+
   positionContainer: { 
     position: 'absolute', 
     alignItems: 'center', 
@@ -3891,4 +3958,4 @@ const styles = StyleSheet.create({
   fmtBtnActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
   fmtBtnText: { color: '#94a3b8', fontSize: 11, fontWeight: 'bold' },
   fmtBtnTextActive: { color: '#0B0E14' }
-});
+});ok 

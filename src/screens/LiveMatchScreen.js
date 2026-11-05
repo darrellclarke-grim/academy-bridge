@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import {
   Alert,
   Platform,
@@ -9,6 +10,7 @@ import {
   View
 } from 'react-native';
 import { useMatchdayStore } from '../store/useMatchdayStore';
+import { supabase } from '../supabase';
 
 // Positional hierarchy ranking: ST (Top) -> Midfield -> Defense -> GK (Bottom)
 const getTacticalRank = (posStr) => {
@@ -51,6 +53,13 @@ export default function LiveMatchScreen({
   subs = [],
   openHalfTimeSubModal
 }) {
+  // 🛡️ ISOLATE STATE WHEN TEAM CHANGES
+  useEffect(() => {
+    if (activeTeamObj?.id) {
+      useMatchdayStore.getState().setActiveTeamId(activeTeamObj.id);
+    }
+  }, [activeTeamObj?.id]);
+
   const matchPhase = useMatchdayStore((state) => state.matchPhase);
   const matchType = useMatchdayStore((state) => state.matchType);
   const setMatchType = useMatchdayStore((state) => state.setMatchType);
@@ -65,9 +74,38 @@ export default function LiveMatchScreen({
   const pendingOfflineCount = useMatchdayStore((state) => state.pendingOfflineCount);
   const setPendingOfflineCount = useMatchdayStore((state) => state.setPendingOfflineCount);
 
+  // Disciplinary Store Selectors
+  const disqualifiedPlayerIds = useMatchdayStore((state) => state.disqualifiedPlayerIds || []);
+  const sinBins = useMatchdayStore((state) => state.sinBins || []);
+  const removeSinBin = useMatchdayStore((state) => state.removeSinBin);
+
   const isGameActive = matchPhase === '1ST HALF' || matchPhase === '2ND HALF';
   const isPreMatch = matchPhase === 'PRE-MATCH';
   const isHalfTime = matchPhase === 'HALF-TIME';
+
+  // 💡 KEEP-AWAKE INTEGRATION (PREVENTS SCREEN SLEEP DURING MATCHES)
+  useEffect(() => {
+    let KeepAwake;
+    try {
+      KeepAwake = require('expo-keep-awake');
+    } catch (e) {}
+
+    if (KeepAwake && KeepAwake.activateKeepAwakeAsync && KeepAwake.deactivateKeepAwake) {
+      if (isGameActive) {
+        KeepAwake.activateKeepAwakeAsync();
+      } else {
+        KeepAwake.deactivateKeepAwake();
+      }
+    }
+
+    return () => {
+      try {
+        if (KeepAwake && KeepAwake.deactivateKeepAwake) {
+          KeepAwake.deactivateKeepAwake();
+        }
+      } catch (e) {}
+    };
+  }, [isGameActive]);
 
   const formatTime = (totalSeconds) => {
     const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
@@ -101,16 +139,40 @@ export default function LiveMatchScreen({
     setPendingOfflineCount(queue.length);
   };
 
-  // Group on-pitch into Outfield pairs + Goalkeeper bottom button
-  const outfieldStarters = [...onPitchPlayers]
+  // Return player from Sin Bin to Bench / Squad pool
+  const handleReleaseFromSinBin = async (sinBin) => {
+    removeSinBin(sinBin.playerId);
+    await supabase
+      .from('players')
+      .update({ matchday_position: 'Bench', is_starter: false })
+      .eq('id', sinBin.playerId);
+
+    Alert.alert(
+      "Sin Bin Completed",
+      `#${sinBin.squadNumber} ${sinBin.playerName} has completed their temporary dismissal and is eligible to re-enter play at the next stoppage.`
+    );
+  };
+
+  // 1. FILTER ON-PITCH PLAYERS (EXCLUDES RED CARDS & ACTIVE SIN BINS)
+  const activePitchPlayers = [...onPitchPlayers].filter(
+    (p) => !disqualifiedPlayerIds.includes(p.id) && !sinBins.some((sb) => sb.playerId === p.id)
+  );
+
+  const outfieldStarters = activePitchPlayers
     .filter(p => !['GK', 'SGK', 'GK/SGK'].some(g => String(p.matchday_position || p.position).toUpperCase().includes(g)))
     .sort((a, b) => getTacticalRank(a.matchday_position || a.position) - getTacticalRank(b.matchday_position || b.position));
 
-  const gkStarters = [...onPitchPlayers]
+  const gkStarters = activePitchPlayers
     .filter(p => ['GK', 'SGK', 'GK/SGK'].some(g => String(p.matchday_position || p.position).toUpperCase().includes(g)));
 
-  const sortedBenchSubs = [...subs]
+  // 2. BENCH & DISCIPLINARY LISTS
+  const eligibleSubs = [...subs]
+    .filter((p) => !disqualifiedPlayerIds.includes(p.id) && !sinBins.some((sb) => sb.playerId === p.id))
     .sort((a, b) => getTacticalRank(a.position) - getTacticalRank(b.position));
+
+  const sentOffPlayers = [...onPitchPlayers, ...subs].filter((p) =>
+    disqualifiedPlayerIds.includes(p.id)
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: '#0B0E14' }}>
@@ -211,6 +273,43 @@ export default function LiveMatchScreen({
         </View>
       </View>
 
+      {/* 🟦 ACTIVE SIN BIN COUNTDOWN BANNERS */}
+      {sinBins.length > 0 && (
+        <View style={styles.sinBinContainer}>
+          {sinBins.map((sb) => {
+            const remainingSecs = Math.max(0, sb.returnSeconds - displaySeconds);
+            const isExpired = remainingSecs === 0;
+
+            return (
+              <View
+                key={sb.playerId}
+                style={[
+                  styles.sinBinBanner,
+                  isExpired ? { borderColor: '#39FF14', backgroundColor: 'rgba(57,255,20,0.1)' } : {}
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.sinBinBannerTitle, isExpired && { color: '#39FF14' }]}>
+                    {isExpired ? '✅ SIN BIN EXPIRED' : '🟦 ACTIVE SIN BIN'}
+                  </Text>
+                  <Text style={styles.sinBinBannerSub}>
+                    #{sb.squadNumber} {sb.playerName} • {isExpired ? 'Eligible to return at stoppage' : `${formatTime(remainingSecs)} remaining`}
+                  </Text>
+                </View>
+                {isExpired && (
+                  <TouchableOpacity
+                    style={styles.sinBinReleaseBtn}
+                    onPress={() => handleReleaseFromSinBin(sb)}
+                  >
+                    <Text style={styles.sinBinReleaseBtnText}>Return ➔</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       {/* HALF-TIME BULK SUBSTITUTIONS BANNER */}
       {isHalfTime && appMode === 'coach' && (
         <TouchableOpacity style={styles.halfTimeActionCard} onPress={openHalfTimeSubModal}>
@@ -294,11 +393,13 @@ export default function LiveMatchScreen({
         )}
       </View>
 
-      {/* PITCH ROSTER & BENCH (TACTICALLY ORGANIZED) */}
+      {/* PITCH ROSTER & BENCH */}
       {appMode === 'coach' && (
         <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.rosterHeaderRow}>
-            <Text style={styles.sectionHeaderModal}>ON PITCH (STARTERS)</Text>
+            <Text style={styles.sectionHeaderModal}>
+              ON PITCH ({outfieldStarters.length + gkStarters.length})
+            </Text>
             <Text style={styles.rosterHint}>
               {isGameActive ? 'Tap player to substitute' : 'Locked outside active play'}
             </Text>
@@ -363,14 +464,16 @@ export default function LiveMatchScreen({
             </TouchableOpacity>
           ))}
 
-          {/* BENCH SUBS (TACTICALLY SORTED: ATTACK DOWN TO GK) */}
-          <Text style={[styles.sectionHeaderModal, { marginTop: 24 }]}>BENCH (SUBS)</Text>
+          {/* BENCH SUBS */}
+          <Text style={[styles.sectionHeaderModal, { marginTop: 24 }]}>
+            BENCH (SUBS - {eligibleSubs.length})
+          </Text>
           <View style={styles.outfieldGrid}>
-            {sortedBenchSubs.length === 0 ? (
+            {eligibleSubs.length === 0 ? (
               <Text style={{ color: '#64748b' }}>Bench is empty.</Text>
             ) : null}
 
-            {sortedBenchSubs.map((p) => (
+            {eligibleSubs.map((p) => (
               <TouchableOpacity 
                 key={p.id} 
                 style={[
@@ -399,6 +502,38 @@ export default function LiveMatchScreen({
             ))}
           </View>
 
+          {/* 🟥 PERMANENTLY SENT OFF (DISMISSED) PLAYERS */}
+          {sentOffPlayers.length > 0 && (
+            <>
+              <Text style={[styles.sectionHeaderModal, { marginTop: 24, color: '#ef4444' }]}>
+                DISMISSED (RED CARDS - {sentOffPlayers.length})
+              </Text>
+              <View style={styles.outfieldGrid}>
+                {sentOffPlayers.map((p) => (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={[styles.liveOutfieldCard, styles.dismissedCard]}
+                    activeOpacity={1}
+                    onPress={() => {
+                      Alert.alert(
+                        "Player Sent Off",
+                        `#${p.squad_number} ${p.name} was permanently dismissed via Red Card and cannot re-enter the match.`
+                      );
+                    }}
+                  >
+                    <View style={styles.cardHeader}>
+                      <Text style={[styles.livePlayerPos, { color: '#ef4444' }]}>🟥 SENT OFF</Text>
+                      <Text style={styles.jerseyNum}>#{p.squad_number}</Text>
+                    </View>
+                    <Text style={[styles.livePlayerName, { color: '#ef4444', textDecorationLine: 'line-through' }]} numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
           <View style={{ height: 40 }} />
         </ScrollView>
       )}
@@ -425,6 +560,12 @@ const styles = StyleSheet.create({
   fmtBtnActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
   fmtBtnText: { color: '#94a3b8', fontSize: 11, fontWeight: 'bold' },
   fmtBtnTextActive: { color: '#0B0E14' },
+  sinBinContainer: { backgroundColor: '#0B0E14', paddingHorizontal: 12, paddingTop: 10 },
+  sinBinBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1A1F26', padding: 10, borderRadius: 8, borderWidth: 1.5, borderColor: '#3b82f6', marginBottom: 6 },
+  sinBinBannerTitle: { color: '#3b82f6', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  sinBinBannerSub: { color: '#ffffff', fontSize: 13, fontWeight: 'bold', marginTop: 2 },
+  sinBinReleaseBtn: { backgroundColor: '#39FF14', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  sinBinReleaseBtnText: { color: '#0B0E14', fontWeight: 'bold', fontSize: 12 },
   halfTimeActionCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0B0E14', padding: 14, marginHorizontal: 12, marginTop: 10, borderRadius: 12, borderWidth: 2, borderColor: '#39FF14' },
   htCardTitle: { color: '#39FF14', fontSize: 14, fontWeight: 'bold' },
   htCardSub: { color: '#94a3b8', fontSize: 11, marginTop: 2 },
@@ -445,6 +586,7 @@ const styles = StyleSheet.create({
   rosterHint: { color: '#64748b', fontSize: 11 },
   outfieldGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8 },
   liveOutfieldCard: { backgroundColor: '#1A1F26', padding: 12, borderRadius: 10, width: '48.5%', borderWidth: 1, borderColor: '#39FF14' },
+  dismissedCard: { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.08)', opacity: 0.7 },
   liveGkCard: { backgroundColor: '#1A1F26', padding: 14, borderRadius: 10, width: '100%', borderWidth: 1.5, borderColor: '#39FF14', marginTop: 8 },
   gkInnerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   gkBadge: { backgroundColor: '#39FF14', color: '#0B0E14', fontSize: 10, fontWeight: '900', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },

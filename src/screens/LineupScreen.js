@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useMatchdayStore } from '../store/useMatchdayStore';
 import { supabase } from '../supabase';
 import { isPlayerEligibleForSlot } from '../utils/positionHelpers';
 
@@ -21,6 +22,8 @@ export default function LineupScreen({
   setTeamSheet,
   currentAvailablePositions = []
 }) {
+  const activeTeamId = useMatchdayStore(s => s.activeTeamId);
+
   // Depth Inspector State
   const [selectedDepthSlot, setSelectedDepthSlot] = useState(null);
   const [drawerMode, setDrawerMode] = useState('inspector'); // 'inspector' | 'add_cover'
@@ -106,6 +109,15 @@ export default function LineupScreen({
         dbUpdates.push(supabase.from('players').update({ matchday_position: 'Bench', is_starter: false }).eq('id', previousStarter.id));
       }
       await Promise.all(dbUpdates);
+      
+      // Notify peers that layout has been manually adjusted
+      if (activeTeamId) {
+        supabase.channel(`team-realtime-${activeTeamId}`).send({
+          type: 'broadcast',
+          event: 'match_state_sync',
+          payload: { lineupAdjusted: true }
+        });
+      }
     } catch (err) {
       console.warn('⚠️ Starter update saved locally:', err);
     }

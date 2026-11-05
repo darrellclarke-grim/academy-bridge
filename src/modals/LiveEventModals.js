@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Modal,
   ScrollView,
@@ -6,23 +7,8 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-
-interface LiveEventModalsProps {
-  liveEventMode: string;
-  setLiveEventMode: (mode: string) => void;
-  pendingEvent: any;
-  opponentName?: string;
-  onPitchPlayers: any[];
-  subs: any[];
-  teamSheet: any[];
-  selectGoalScorer: (playerOrOpponent: any) => void;
-  selectGoalAssist: (playerOrNone: any) => void;
-  selectCardType: (type: 'yellow' | 'red') => void;
-  finishCardFlow: (playerOrOpponent: any) => void;
-  promptSubReason: (player: any) => void;
-  selectCoachMotm: (player: any) => void;
-  selectParentMotm: (player: any) => void;
-}
+import { useMatchdayStore } from '../store/useMatchdayStore';
+import { supabase } from '../supabase';
 
 export default function LiveEventModals({
   liveEventMode,
@@ -39,8 +25,62 @@ export default function LiveEventModals({
   promptSubReason,
   selectCoachMotm,
   selectParentMotm,
-}: LiveEventModalsProps) {
+}) {
+  const [sinBinDuration, setSinBinDuration] = useState(10); // 8m (youth) vs 10m (adult/senior)
+
+  const disqualifiedPlayerIds = useMatchdayStore((s) => s.disqualifiedPlayerIds || []);
+  const sinBins = useMatchdayStore((s) => s.sinBins || []);
+  const displaySeconds = useMatchdayStore((s) => s.displaySeconds || 0);
+
   if (liveEventMode === 'none') return null;
+
+  // Filter out any player who is permanently sent off
+  const availablePitchPlayers = onPitchPlayers.filter(
+    (p) => !disqualifiedPlayerIds.includes(p.id)
+  );
+
+  const availableBenchSubs = subs.filter(
+    (p) => !disqualifiedPlayerIds.includes(p.id) && !sinBins.some((sb) => sb.playerId === p.id)
+  );
+
+  // Card Completion Handler
+  const handleCardSelection = async (playerOrOpponent) => {
+    const cardType = pendingEvent?.cardType || 'yellow';
+
+    if (playerOrOpponent !== 'Opponent' && playerOrOpponent?.id) {
+      if (cardType === 'red') {
+        // 1. Permanent Dismissal: Register in store
+        useMatchdayStore.getState().addRedCard(playerOrOpponent.id);
+
+        // 2. Remove from pitch in Supabase
+        await supabase
+          .from('players')
+          .update({ is_starter: false, matchday_position: 'Sent Off' })
+          .eq('id', playerOrOpponent.id);
+      } else if (cardType === 'blue') {
+        // 1. Temporary Dismissal (Sin Bin): Register in store
+        const duration = pendingEvent?.sinBinDuration || sinBinDuration || 10;
+        useMatchdayStore.getState().addSinBin({
+          playerId: playerOrOpponent.id,
+          playerName: playerOrOpponent.name,
+          squadNumber: playerOrOpponent.squad_number,
+          durationMinutes: duration,
+          returnSeconds: displaySeconds + duration * 60,
+          startTime: Date.now(),
+        });
+
+        // 2. Move to touchline sin bin in Supabase
+        await supabase
+          .from('players')
+          .update({ is_starter: false, matchday_position: 'Sin Bin' })
+          .eq('id', playerOrOpponent.id);
+      }
+    }
+
+    if (finishCardFlow) {
+      finishCardFlow(playerOrOpponent);
+    }
+  };
 
   return (
     <Modal visible={liveEventMode !== 'none'} transparent animationType="fade">
@@ -50,33 +90,81 @@ export default function LiveEventModals({
           activeOpacity={1}
           onPress={() => setLiveEventMode('none')}
         />
-        
+
         <View style={styles.modalBox}>
-          
+
           {/* ========================================================= */}
-          {/* 1. CARD TYPE SELECTOR (🟨 / 🟥) */}
+          {/* 1. CARD TYPE SELECTOR (🟨 YELLOW / 🟦 BLUE / 🟥 RED)    */}
           {/* ========================================================= */}
           {liveEventMode === 'card_type' && (
             <>
               <Text style={styles.modalTitle}>Select Disciplinary Card</Text>
               <Text style={styles.modalSubTitle}>Choose the card issued by the referee</Text>
-              
+
               <View style={styles.cardTypeRow}>
+                {/* YELLOW CARD */}
                 <TouchableOpacity
                   style={[styles.cardSelectBtn, { borderColor: '#eab308', backgroundColor: 'rgba(234, 179, 8, 0.15)' }]}
-                  onPress={() => selectCardType('yellow')}
+                  onPress={() => {
+                    selectCardType('yellow');
+                  }}
                 >
                   <Text style={styles.cardSelectIcon}>🟨</Text>
                   <Text style={[styles.cardSelectText, { color: '#eab308' }]}>Yellow Card</Text>
+                  <Text style={styles.cardDescText}>Standard Caution</Text>
                 </TouchableOpacity>
 
+                {/* BLUE CARD (SIN BIN) */}
+                <TouchableOpacity
+                  style={[styles.cardSelectBtn, { borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}
+                  onPress={() => {
+                    useMatchdayStore.getState().setPendingEvent((prev) => ({
+                      ...(prev || {}),
+                      cardType: 'blue',
+                      sinBinDuration,
+                    }));
+                    setLiveEventMode('card_player');
+                  }}
+                >
+                  <Text style={styles.cardSelectIcon}>🟦</Text>
+                  <Text style={[styles.cardSelectText, { color: '#3b82f6' }]}>Blue Card</Text>
+                  <Text style={styles.cardDescText}>{sinBinDuration}m Sin Bin</Text>
+                </TouchableOpacity>
+
+                {/* RED CARD */}
                 <TouchableOpacity
                   style={[styles.cardSelectBtn, { borderColor: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}
-                  onPress={() => selectCardType('red')}
+                  onPress={() => {
+                    selectCardType('red');
+                  }}
                 >
                   <Text style={styles.cardSelectIcon}>🟥</Text>
                   <Text style={[styles.cardSelectText, { color: '#ef4444' }]}>Red Card</Text>
+                  <Text style={styles.cardDescText}>Dismissal</Text>
                 </TouchableOpacity>
+              </View>
+
+              {/* SIN BIN DURATION TOGGLE (8m vs 10m) */}
+              <View style={styles.sinBinDurationRow}>
+                <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: 'bold' }}>Sin Bin Length:</Text>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <TouchableOpacity
+                    style={[styles.durationPill, sinBinDuration === 8 && styles.durationPillActive]}
+                    onPress={() => setSinBinDuration(8)}
+                  >
+                    <Text style={[styles.durationPillText, sinBinDuration === 8 && styles.durationPillTextActive]}>
+                      8 Min (Youth)
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.durationPill, sinBinDuration === 10 && styles.durationPillActive]}
+                    onPress={() => setSinBinDuration(10)}
+                  >
+                    <Text style={[styles.durationPillText, sinBinDuration === 10 && styles.durationPillTextActive]}>
+                      10 Min (Adult/U16+)
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setLiveEventMode('none')}>
@@ -86,20 +174,24 @@ export default function LiveEventModals({
           )}
 
           {/* ========================================================= */}
-          {/* 2. CARD PLAYER SELECTOR (Pitch First, Bench Second) */}
+          {/* 2. CARD PLAYER SELECTOR                                  */}
           {/* ========================================================= */}
           {liveEventMode === 'card_player' && (
             <>
               <Text style={styles.modalTitle}>
-                {pendingEvent?.cardType === 'yellow' ? '🟨 Yellow Card' : '🟥 Red Card'} Recipient
+                {pendingEvent?.cardType === 'yellow'
+                  ? '🟨 Yellow Card'
+                  : pendingEvent?.cardType === 'blue'
+                  ? `🟦 Blue Card (${pendingEvent?.sinBinDuration || sinBinDuration}m Sin Bin)`
+                  : '🟥 Red Card (Permanent Dismissal)'}
               </Text>
               <Text style={styles.modalSubTitle}>Select the disciplined player</Text>
 
               <ScrollView style={{ maxHeight: 380, width: '100%', marginTop: 8 }} showsVerticalScrollIndicator={true}>
-                {/* OPPONENT OPTION AT TOP */}
+                {/* OPPOSITION RECIPIENT */}
                 <TouchableOpacity
                   style={styles.opponentRow}
-                  onPress={() => finishCardFlow('Opponent')}
+                  onPress={() => handleCardSelection('Opponent')}
                 >
                   <View>
                     <Text style={styles.opponentNameText}>⚠️ Opposition Player</Text>
@@ -108,19 +200,19 @@ export default function LiveEventModals({
                   <Text style={styles.actionArrow}>➔</Text>
                 </TouchableOpacity>
 
-                {/* SECTION 1: PITCH PLAYERS (STARTERS FIRST) */}
+                {/* ON PITCH STARTERS */}
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionHeaderText}>ON PITCH ({onPitchPlayers.length})</Text>
+                  <Text style={styles.sectionHeaderText}>ON PITCH ({availablePitchPlayers.length})</Text>
                 </View>
 
-                {onPitchPlayers.length === 0 ? (
+                {availablePitchPlayers.length === 0 ? (
                   <Text style={styles.emptyText}>No pitch players assigned</Text>
                 ) : (
-                  onPitchPlayers.map((player) => (
+                  availablePitchPlayers.map((player) => (
                     <TouchableOpacity
                       key={player.id}
                       style={styles.playerRowPitch}
-                      onPress={() => finishCardFlow(player)}
+                      onPress={() => handleCardSelection(player)}
                     >
                       <View style={styles.playerInfoLeft}>
                         <View style={styles.numberBadgePitch}>
@@ -138,19 +230,19 @@ export default function LiveEventModals({
                   ))
                 )}
 
-                {/* SECTION 2: BENCH PLAYERS (SUBSTITUTES) */}
+                {/* BENCH PLAYERS */}
                 <View style={[styles.sectionHeader, { marginTop: 12 }]}>
-                  <Text style={[styles.sectionHeaderText, { color: '#94a3b8' }]}>BENCH ({subs.length})</Text>
+                  <Text style={[styles.sectionHeaderText, { color: '#94a3b8' }]}>BENCH ({availableBenchSubs.length})</Text>
                 </View>
 
-                {subs.length === 0 ? (
+                {availableBenchSubs.length === 0 ? (
                   <Text style={styles.emptyText}>No substitutes available</Text>
                 ) : (
-                  subs.map((player) => (
+                  availableBenchSubs.map((player) => (
                     <TouchableOpacity
                       key={player.id}
                       style={styles.playerRowBench}
-                      onPress={() => finishCardFlow(player)}
+                      onPress={() => handleCardSelection(player)}
                     >
                       <View style={styles.playerInfoLeft}>
                         <View style={styles.numberBadgeBench}>
@@ -176,7 +268,7 @@ export default function LiveEventModals({
           )}
 
           {/* ========================================================= */}
-          {/* 3. GOAL SCORER SELECTOR */}
+          {/* 3. GOAL SCORER SELECTOR                                  */}
           {/* ========================================================= */}
           {liveEventMode === 'goal_scorer' && (
             <>
@@ -196,10 +288,10 @@ export default function LiveEventModals({
                 </TouchableOpacity>
 
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionHeaderText}>ON PITCH ({onPitchPlayers.length})</Text>
+                  <Text style={styles.sectionHeaderText}>ON PITCH ({availablePitchPlayers.length})</Text>
                 </View>
 
-                {onPitchPlayers.map((player) => (
+                {availablePitchPlayers.map((player) => (
                   <TouchableOpacity
                     key={player.id}
                     style={styles.playerRowPitch}
@@ -218,12 +310,12 @@ export default function LiveEventModals({
                   </TouchableOpacity>
                 ))}
 
-                {subs.length > 0 && (
+                {availableBenchSubs.length > 0 && (
                   <>
                     <View style={[styles.sectionHeader, { marginTop: 12 }]}>
-                      <Text style={[styles.sectionHeaderText, { color: '#94a3b8' }]}>BENCH ({subs.length})</Text>
+                      <Text style={[styles.sectionHeaderText, { color: '#94a3b8' }]}>BENCH ({availableBenchSubs.length})</Text>
                     </View>
-                    {subs.map((player) => (
+                    {availableBenchSubs.map((player) => (
                       <TouchableOpacity
                         key={player.id}
                         style={styles.playerRowBench}
@@ -252,7 +344,7 @@ export default function LiveEventModals({
           )}
 
           {/* ========================================================= */}
-          {/* 4. GOAL ASSIST SELECTOR */}
+          {/* 4. GOAL ASSIST SELECTOR                                  */}
           {/* ========================================================= */}
           {liveEventMode === 'goal_assist' && (
             <>
@@ -272,10 +364,10 @@ export default function LiveEventModals({
                 </TouchableOpacity>
 
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionHeaderText}>ON PITCH ({onPitchPlayers.length})</Text>
+                  <Text style={styles.sectionHeaderText}>ON PITCH ({availablePitchPlayers.length})</Text>
                 </View>
 
-                {onPitchPlayers
+                {availablePitchPlayers
                   .filter((p) => p.id !== pendingEvent?.scorer?.id)
                   .map((player) => (
                     <TouchableOpacity
@@ -304,7 +396,7 @@ export default function LiveEventModals({
           )}
 
           {/* ========================================================= */}
-          {/* 5. SUBSTITUTION TARGET SELECTOR */}
+          {/* 5. SUBSTITUTION TARGET SELECTOR                          */}
           {/* ========================================================= */}
           {liveEventMode === 'sub_selection' && (
             <>
@@ -316,7 +408,7 @@ export default function LiveEventModals({
               </Text>
 
               <ScrollView style={{ maxHeight: 350, width: '100%', marginTop: 8 }}>
-                {(pendingEvent?.isSubbingOff ? subs : onPitchPlayers).map((player) => (
+                {(pendingEvent?.isSubbingOff ? availableBenchSubs : availablePitchPlayers).map((player) => (
                   <TouchableOpacity
                     key={player.id}
                     style={styles.playerRowPitch}
@@ -343,7 +435,7 @@ export default function LiveEventModals({
           )}
 
           {/* ========================================================= */}
-          {/* 6. COACH POTM */}
+          {/* 6. COACH POTM                                            */}
           {/* ========================================================= */}
           {liveEventMode === 'coach_motm' && (
             <>
@@ -351,7 +443,7 @@ export default function LiveEventModals({
               <Text style={styles.modalSubTitle}>Select today's Player of the Match</Text>
 
               <ScrollView style={{ maxHeight: 350, width: '100%', marginTop: 8 }}>
-                {teamSheet.filter(p => p.available).map((player) => (
+                {teamSheet.filter((p) => p.available && !disqualifiedPlayerIds.includes(p.id)).map((player) => (
                   <TouchableOpacity
                     key={player.id}
                     style={styles.playerRowPitch}
@@ -375,7 +467,7 @@ export default function LiveEventModals({
           )}
 
           {/* ========================================================= */}
-          {/* 7. PARENT/FAN POTM */}
+          {/* 7. PARENT/FAN POTM                                       */}
           {/* ========================================================= */}
           {liveEventMode === 'parent_motm' && (
             <>
@@ -383,7 +475,7 @@ export default function LiveEventModals({
               <Text style={styles.modalSubTitle}>Cast your vote for today's top performer</Text>
 
               <ScrollView style={{ maxHeight: 350, width: '100%', marginTop: 8 }}>
-                {teamSheet.filter(p => p.available).map((player) => (
+                {teamSheet.filter((p) => p.available && !disqualifiedPlayerIds.includes(p.id)).map((player) => (
                   <TouchableOpacity
                     key={player.id}
                     style={styles.playerRowPitch}
@@ -422,7 +514,7 @@ const styles = StyleSheet.create({
   },
   modalBox: {
     backgroundColor: '#1A1F26',
-    width: '92%',
+    width: '94%',
     padding: 20,
     borderRadius: 16,
     borderWidth: 1,
@@ -443,25 +535,62 @@ const styles = StyleSheet.create({
   },
   cardTypeRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginVertical: 18,
+    gap: 8,
+    marginVertical: 14,
   },
   cardSelectBtn: {
     flex: 1,
-    paddingVertical: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
     borderRadius: 12,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cardSelectIcon: {
-    fontSize: 32,
-    marginBottom: 8,
+    fontSize: 26,
+    marginBottom: 4,
   },
   cardSelectText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: 'bold',
     textTransform: 'uppercase',
+  },
+  cardDescText: {
+    color: '#94a3b8',
+    fontSize: 10,
+    marginTop: 2,
+  },
+  sinBinDurationRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#0B0E14',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#2E3A44',
+  },
+  durationPill: {
+    backgroundColor: '#1A1F26',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#2E3A44',
+  },
+  durationPillActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  durationPillText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  durationPillTextActive: {
+    color: '#ffffff',
   },
   opponentRow: {
     flexDirection: 'row',
