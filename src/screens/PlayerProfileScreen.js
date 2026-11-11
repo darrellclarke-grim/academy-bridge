@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react';
 import {
+  Alert,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
+import { useMatchdayStore } from '../store/useMatchdayStore';
+import { supabase } from '../supabase';
 import { generatePlayerReportCard } from '../utils/pdfGenerator';
 
 export default function PlayerProfileScreen({
   myLinkedPlayers = [],
   teamSheet = [],
+  isSuperUser = false,
   activePlayerId,
   setActivePlayerId,
   activeFormation = '4-2-3-1',
@@ -56,11 +61,40 @@ export default function PlayerProfileScreen({
 
   const [pitchMainTab, setPitchMainTab] = useState('role');
   const [pitchSubTab, setPitchSubTab] = useState('thirds');
+  const [upcomingFixture, setUpcomingFixture] = useState(null);
 
-  const isVotingUnlocked = matchPhase === '2ND HALF';
+  // Live match state pulled directly from Zustand store
+  const storeMatchPhase = useMatchdayStore((s) => s.matchPhase);
+  const displaySeconds = useMatchdayStore((s) => s.displaySeconds);
+  const teamScore = useMatchdayStore((s) => s.teamScore);
+  const opponentScore = useMatchdayStore((s) => s.opponentScore);
+  const storeOpponentName = useMatchdayStore((s) => s.opponentName);
+  const storeMatchType = useMatchdayStore((s) => s.matchType);
+
+  const currentPhase = matchPhase || storeMatchPhase || 'PRE-MATCH';
+  const isMatchLive = currentPhase === '1ST HALF' || currentPhase === '2ND HALF' || currentPhase === 'HALF-TIME';
+  const isMatchFullTime = currentPhase === 'FULL-TIME';
+
+  const isVotingUnlocked = currentPhase === '2ND HALF';
   const isVoteButtonDisabled = hasVotedMotm || !isVotingUnlocked;
   
   const isAdultFanMode = appMode === 'parent' && String(teamAgeGroup || '').toLowerCase().includes('adult');
+
+  const formatTime = (totalSeconds = 0) => {
+    const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+    const s = (totalSeconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  // 👑 SUPERUSER GOD MODE: Superuser sees all players across all modes.
+  // Regular parents only see linked kids; regular players only see themselves.
+  const squad = isSuperUser
+    ? teamSheet
+    : appMode === 'parent'
+    ? (myLinkedPlayers.length > 0 ? myLinkedPlayers : teamSheet.filter(p => p.id === activePlayerId))
+    : appMode === 'player'
+    ? (activePlayer?.id ? [activePlayer] : teamSheet.filter(p => p.id === activePlayerId))
+    : teamSheet;
 
   const visibleTabs = isAdultFanMode
     ? [{ key: 'overview', label: 'Matchday Hub' }]
@@ -77,6 +111,27 @@ export default function PlayerProfileScreen({
         { key: 'rsvp', label: 'RSVP' }
       ];
 
+  // Fetch upcoming mid-week fixture draft from Supabase
+  useEffect(() => {
+    if (!activeTeamId) return;
+
+    supabase
+      .from('teams')
+      .select('name, live_match_state')
+      .eq('id', activeTeamId)
+      .single()
+      .then(({ data }) => {
+        if (data && data.live_match_state) {
+          setUpcomingFixture({
+            teamName: data.name,
+            opponentName: data.live_match_state.opponentName || storeOpponentName || 'Opponent TBD',
+            matchType: data.live_match_state.matchType || storeMatchType || 'Match',
+            phase: data.live_match_state.matchPhase || 'PRE-MATCH'
+          });
+        }
+      });
+  }, [activeTeamId, currentPhase]);
+
   useEffect(() => {
     if ((appMode === 'parent' || isAdultFanMode) && (currentActiveTab === 'roles' || (isAdultFanMode && currentActiveTab !== 'overview'))) {
       changeTab('overview');
@@ -88,7 +143,39 @@ export default function PlayerProfileScreen({
     setInternalTab(tabKey);
   };
 
-  const squad = (teamSheet && teamSheet.length > 0) ? teamSheet : (myLinkedPlayers || []);
+  // 🔑 Safeguarding: Parent generates dedicated Player Activation PIN
+  const handleGeneratePlayerPin = async (player) => {
+    if (!player || !player.id) return;
+
+    const activationPin = `PL-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    try {
+      const { error } = await supabase
+        .from('players')
+        .update({ player_activation_code: activationPin })
+        .eq('id', player.id);
+
+      if (error) throw error;
+
+      Alert.alert(
+        "Player Activation Code Generated! 🌟",
+        `Activation Code for ${player.name}: ${activationPin}\n\nYour child can now download the app, select 'Join Existing Team', and enter this code to activate their dedicated Player account.`,
+        [
+          { text: "Done", style: "cancel" },
+          {
+            text: "Share Code 📲",
+            onPress: () => {
+              Share.share({
+                message: `Hey ${player.name}! Here is your Tactical Engine player login code: ${activationPin}\n\nDownload the app and enter this code under 'Join Existing Team' to view your stats and drills!`
+              });
+            }
+          }
+        ]
+      );
+    } catch (err) {
+      Alert.alert("Error Generating Code", err?.message || "Could not generate player PIN.");
+    }
+  };
 
   const renderQuizExplanation = (explanation) => {
     if (!explanation) return null;
@@ -183,6 +270,7 @@ export default function PlayerProfileScreen({
       <View style={styles.pitchGoalBottomFrame} />
     </View>
   );
+
   const renderRadarChart = () => {
     const phy = Math.round(
       ((activePlayer?.phys_sprint || 5) +
@@ -242,9 +330,10 @@ export default function PlayerProfileScreen({
 
   return (
     <View style={styles.container}>
+      {/* SCOPED SELECTION BAR */}
       <View style={styles.selectorBar}>
         <Text style={styles.selectorLabel}>
-          {isAdultFanMode ? 'SQUAD MEMBERS:' : appMode === 'parent' ? 'VIEWING PLAYER:' : 'SELECT PLAYER PROFILE:'}
+          {isSuperUser ? '👑 SUPERUSER - ALL SQUAD PROFILES:' : isAdultFanMode ? 'SQUAD MEMBERS:' : appMode === 'parent' ? 'YOUR LINKED PLAYERS:' : 'PLAYER PROFILE:'}
         </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
           {squad.map((p) => {
@@ -291,6 +380,7 @@ export default function PlayerProfileScreen({
       <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
         {currentActiveTab === 'overview' && (
           <>
+            {/* 1. SEASON MATCHDAY STATS (PERMANENTLY AT THE TOP) */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>SEASON MATCHDAY STATS</Text>
               <View style={styles.statsGrid}>
@@ -332,12 +422,79 @@ export default function PlayerProfileScreen({
               </View>
             </View>
 
+            {/* 2. DYNAMIC FIXTURE & LIVE MATCH CARD (BELOW STATS, ABOVE TICKER) */}
+            <View style={[styles.upcomingFixtureCard, isMatchLive && { borderColor: '#ef4444' }]}>
+              <View style={styles.cardHeaderRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {isMatchLive && <View style={styles.pulseLiveDot} />}
+                  <Text style={[styles.cardTitle, isMatchLive ? { color: '#ef4444' } : { color: '#39FF14' }]}>
+                    {isMatchLive ? '🔴 LIVE MATCH IN PROGRESS' : isMatchFullTime ? '🏁 FULL-TIME RESULT' : '📅 UPCOMING FIXTURE PREPARATION'}
+                  </Text>
+                </View>
+                <View style={[styles.fixtureTypeBadge, isMatchLive && { borderColor: '#ef4444' }]}>
+                  <Text style={[styles.fixtureTypeBadgeText, isMatchLive && { color: '#ef4444' }]}>
+                    {isMatchLive ? currentPhase : (upcomingFixture?.matchType || storeMatchType || 'FIXTURE').toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Running Match Clock Display during active play */}
+              {isMatchLive && (
+                <View style={styles.liveClockRow}>
+                  <Text style={styles.liveClockDigits}>⏱️ {formatTime(displaySeconds)}</Text>
+                  <Text style={styles.liveClockSub}>Minute {Math.floor(displaySeconds / 60)}'</Text>
+                </View>
+              )}
+
+              {/* Team matchup & Live/Final scoreline */}
+              <View style={styles.fixtureMatchupRow}>
+                <Text style={styles.fixtureTeamName} numberOfLines={1}>
+                  {upcomingFixture?.teamName || 'Our Team'}
+                </Text>
+                
+                {isMatchLive || isMatchFullTime ? (
+                  <View style={styles.liveScoreBadge}>
+                    <Text style={styles.liveScoreDigits}>
+                      {teamScore} - {opponentScore}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.fixtureVsBadge}>VS</Text>
+                )}
+
+                <Text style={[styles.fixtureTeamName, { textAlign: 'right', color: '#39FF14' }]} numberOfLines={1}>
+                  {storeOpponentName || upcomingFixture?.opponentName || 'Opponent TBD'}
+                </Text>
+              </View>
+
+              {/* One-Tap RSVP for Mid-Week Prep */}
+              {!isMatchLive && !isMatchFullTime && (appMode === 'parent' || appMode === 'player') && (
+                <View style={styles.fixtureRsvpSection}>
+                  <Text style={styles.fixtureRsvpLabel}>
+                    {activePlayer?.name}'s Availability:
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.fixtureRsvpBtn,
+                      activePlayer?.available ? styles.fixtureRsvpBtnActive : styles.fixtureRsvpBtnInactive
+                    ]}
+                    onPress={() => toggleRSVP && toggleRSVP(activePlayer)}
+                  >
+                    <Text style={styles.fixtureRsvpBtnText}>
+                      {activePlayer?.available ? '✅ Confirmed Available' : '❌ Unavailable / Not Attending'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
             {isAdultFanMode && faLeagueUrl ? (
               <TouchableOpacity style={styles.faLeagueBtnCard} onPress={() => setIsFaWebviewOpen && setIsFaWebviewOpen(true)}>
                 <Text style={styles.faLeagueBtnText}>🏆 View Official FA League Table ➔</Text>
               </TouchableOpacity>
             ) : null}
 
+            {/* 3. LIVE MATCH TICKER (BELOW FIXTURE CARD) */}
             <View style={styles.card}>
               <View style={styles.cardHeaderRow}>
                 <Text style={styles.cardTitle}>LIVE MATCH TICKER</Text>
@@ -346,14 +503,10 @@ export default function PlayerProfileScreen({
                 </TouchableOpacity>
               </View>
 
-              {matchPhase !== 'PRE-MATCH' && matchPhase !== 'FULL-TIME' && (
-                <View style={styles.liveMatchStatusBadge}>
-                  <Text style={styles.liveMatchStatusText}>🔴 LIVE MATCH IN PROGRESS ({matchPhase})</Text>
-                </View>
-              )}
-
               {(liveTicker || []).length === 0 ? (
-                <Text style={styles.emptyText}>No live match events recorded yet.</Text>
+                <Text style={styles.emptyText}>
+                  {currentPhase === 'PRE-MATCH' ? 'Awaiting Kick-Off... Events will appear here live.' : 'No live match events recorded yet.'}
+                </Text>
               ) : (
                 liveTicker.slice(0, 5).map((evt, idx) => (
                   <View key={idx} style={styles.tickerRow}>
@@ -398,6 +551,7 @@ export default function PlayerProfileScreen({
               )}
             </View>
 
+            {/* 4. OPPOSITION SCOUTING REPORT */}
             {!!scoutNotesInput && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>OPPOSITION SCOUTING REPORT</Text>
@@ -405,9 +559,22 @@ export default function PlayerProfileScreen({
               </View>
             )}
 
+            {/* 5. SHARE & ACCESS CONTROL */}
             {!isAdultFanMode && (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>SHARE PROFILE ACCESS</Text>
+                <Text style={styles.cardTitle}>SHARE & ACCESS CONTROL</Text>
+                
+                {appMode === 'parent' && (
+                  <TouchableOpacity
+                    style={[styles.neonBtn, { backgroundColor: '#3b82f6', marginBottom: 12 }]}
+                    onPress={() => handleGeneratePlayerPin(activePlayer)}
+                  >
+                    <Text style={[styles.neonBtnText, { color: '#ffffff' }]}>
+                      🔑 Grant Player App Access (Generate PIN)
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 5 }}>
                   <TouchableOpacity
                     style={[styles.roleToggleBtn, { borderColor: '#3B82F6' }]}
@@ -898,11 +1065,11 @@ export default function PlayerProfileScreen({
             )}
           </>
         )}
+
         {currentActiveTab === 'radar' && !isAdultFanMode && (
           <>
             {renderRadarChart()}
 
-            {/* PDF REPORT CARD EXPORT BUTTON */}
             <TouchableOpacity 
               style={[styles.neonBtn, { marginBottom: 15 }]} 
               onPress={() => generatePlayerReportCard({
@@ -1010,6 +1177,26 @@ const styles = StyleSheet.create({
   subTabTextActive: { color: '#FFFFFF' },
   content: { padding: 15 },
 
+  // Dynamic Fixture & Live Match Card
+  upcomingFixtureCard: { backgroundColor: '#141922', borderRadius: 12, padding: 16, marginBottom: 15, borderWidth: 1.5, borderColor: '#39FF14' },
+  pulseLiveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
+  liveClockRow: { alignItems: 'center', marginVertical: 6, backgroundColor: '#0B0E14', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44' },
+  liveClockDigits: { color: '#39FF14', fontSize: 20, fontWeight: 'bold', fontFamily: 'monospace' },
+  liveClockSub: { color: '#94A3B8', fontSize: 10, fontWeight: 'bold', marginTop: 2 },
+  liveScoreBadge: { backgroundColor: '#0B0E14', paddingHorizontal: 14, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#39FF14', marginHorizontal: 8 },
+  liveScoreDigits: { color: '#39FF14', fontSize: 16, fontWeight: 'bold' },
+  fixtureTypeBadge: { backgroundColor: '#0B0E14', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#2E3A44' },
+  fixtureTypeBadgeText: { color: '#3b82f6', fontSize: 10, fontWeight: 'bold' },
+  fixtureMatchupRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 10 },
+  fixtureTeamName: { color: '#FFFFFF', fontSize: 15, fontWeight: 'bold', flex: 1 },
+  fixtureVsBadge: { color: '#64748B', fontSize: 12, fontWeight: 'bold', marginHorizontal: 8 },
+  fixtureRsvpSection: { borderTopWidth: 1, borderTopColor: '#2E3A44', paddingTop: 12, marginTop: 4 },
+  fixtureRsvpLabel: { color: '#CBD5E1', fontSize: 12, fontWeight: 'bold', marginBottom: 6 },
+  fixtureRsvpBtn: { paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, alignItems: 'center' },
+  fixtureRsvpBtnActive: { backgroundColor: '#15803D' },
+  fixtureRsvpBtnInactive: { backgroundColor: '#991B1B' },
+  fixtureRsvpBtnText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 13 },
+
   faLeagueBtnCard: { backgroundColor: '#1A1F26', padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#3B82F6', marginBottom: 15, alignItems: 'center' },
   faLeagueBtnText: { color: '#3B82F6', fontWeight: 'bold', fontSize: 14 },
 
@@ -1053,8 +1240,6 @@ const styles = StyleSheet.create({
   neonBtnText: { color: '#0B0E14', fontWeight: 'bold', fontSize: 13 },
   emptyText: { color: '#64748B', fontSize: 12, fontStyle: 'italic' },
 
-  liveMatchStatusBadge: { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderWidth: 1, borderColor: '#EF4444', padding: 8, borderRadius: 6, marginBottom: 12, alignItems: 'center' },
-  liveMatchStatusText: { color: '#EF4444', fontWeight: 'bold', fontSize: 11 },
   tickerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#2E3A44', gap: 8 },
   tickerMinute: { color: '#39FF14', fontWeight: 'bold', fontSize: 12, width: 30 },
   tickerIcon: { fontSize: 14 },
@@ -1069,366 +1254,56 @@ const styles = StyleSheet.create({
   optionBreakdownHeading: { fontWeight: 'bold', fontSize: 13, marginBottom: 3 },
   explanationBodyText: { color: '#CBD5E1', fontSize: 12, lineHeight: 19 },
 
-  pitchCanvasFrame: {
-    width: '100%',
-    marginVertical: 10,
-    alignItems: 'center',
-  },
-  pitchGoalTopFrame: {
-    width: 50,
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-    borderBottomLeftRadius: 3,
-    borderBottomRightRadius: 3,
-    marginBottom: 2,
-  },
-  pitchGoalBottomFrame: {
-    width: 50,
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
-    marginTop: 2,
-  },
-  pitchTurfBody: {
-    width: '100%',
-    height: 380,
-    backgroundColor: '#0D2B16',
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#1E4D2B',
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  pitchOuterBoundary: {
-    position: 'absolute',
-    top: 10,
-    bottom: 10,
-    left: 10,
-    right: 10,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-  },
-  pitchHalfwayLine: {
-    position: 'absolute',
-    top: '50%',
-    left: 10,
-    right: 10,
-    height: 1.5,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-  },
-  pitchCenterCircle: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: 70,
-    height: 70,
-    marginLeft: -35,
-    marginTop: -35,
-    borderRadius: 35,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-  },
-  pitchCenterSpot: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: 6,
-    height: 6,
-    marginLeft: -3,
-    marginTop: -3,
-    borderRadius: 3,
-    backgroundColor: '#FFFFFF',
-  },
-  pitchPenaltyBoxTop: {
-    position: 'absolute',
-    top: 10,
-    left: '22%',
-    right: '22%',
-    height: 55,
-    borderWidth: 1.5,
-    borderTopWidth: 0,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-  },
-  pitchGoalBoxTop: {
-    position: 'absolute',
-    top: 10,
-    left: '36%',
-    right: '36%',
-    height: 20,
-    borderWidth: 1.5,
-    borderTopWidth: 0,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-  },
-  pitchPenaltySpotTop: {
-    position: 'absolute',
-    top: 48,
-    left: '50%',
-    width: 4,
-    height: 4,
-    marginLeft: -2,
-    borderRadius: 2,
-    backgroundColor: '#FFFFFF',
-  },
-  pitchPenaltyArcTop: {
-    position: 'absolute',
-    top: 50,
-    left: '40%',
-    width: '20%',
-    height: 20,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderTopWidth: 0,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-  },
-  pitchPenaltyBoxBottom: {
-    position: 'absolute',
-    bottom: 10,
-    left: '22%',
-    right: '22%',
-    height: 55,
-    borderWidth: 1.5,
-    borderBottomWidth: 0,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-  },
-  pitchGoalBoxBottom: {
-    position: 'absolute',
-    bottom: 10,
-    left: '36%',
-    right: '36%',
-    height: 20,
-    borderWidth: 1.5,
-    borderBottomWidth: 0,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-  },
-  pitchPenaltySpotBottom: {
-    position: 'absolute',
-    bottom: 48,
-    left: '50%',
-    width: 4,
-    height: 4,
-    marginLeft: -2,
-    borderRadius: 2,
-    backgroundColor: '#FFFFFF',
-  },
-  pitchPenaltyArcBottom: {
-    position: 'absolute',
-    bottom: 50,
-    left: '40%',
-    width: '20%',
-    height: 20,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderBottomWidth: 0,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-  },
-  cornerArc: {
-    position: 'absolute',
-    width: 10,
-    height: 10,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.85)',
-  },
-
-  pitchOverlayLayer: {
-    position: 'absolute',
-    top: 10,
-    bottom: 10,
-    left: 10,
-    right: 10,
-    zIndex: 10,
-  },
-
-  pitchOverlayThird: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pitchZoneBadge: {
-    backgroundColor: 'rgba(11, 14, 20, 0.85)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#2E3A44',
-  },
-  pitchZoneBadgeText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  pitchZoneSubText: {
-    color: '#CBD5E1',
-    fontSize: 9,
-    fontWeight: 'bold',
-    marginTop: 2,
-  },
-  zoneDescCard: {
-    backgroundColor: '#0B0E14',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2E3A44',
-    marginTop: 5,
-  },
-  zoneDescHeading: {
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  zoneDescBody: {
-    color: '#CBD5E1',
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-
-  grid18Container: {
-    flex: 1,
-  },
-  grid18Row: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  grid18Cell: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-    borderStyle: 'dashed',
-  },
-  grid18BoxCell: {
-    backgroundColor: 'rgba(59, 130, 246, 0.12)',
-  },
-  grid18GoldenCell: {
-    backgroundColor: 'rgba(57, 255, 20, 0.35)',
-    borderColor: '#39FF14',
-    borderWidth: 2,
-    borderRadius: 4,
-  },
-  grid18Text: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  grid18GoldenText: {
-    color: '#39FF14',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-
-  corridorHeaderLabelBar: {
-    flexDirection: 'row',
-    width: '100%',
-    backgroundColor: '#0B0E14',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#2E3A44',
-    marginBottom: 8,
-  },
-  corridorLabelText: {
-    flex: 1,
-    color: '#94A3B8',
-    fontSize: 8,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  proCorridorCanvasContainer: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  wideChannelCol: {
-    width: '20%',
-    flexDirection: 'column',
-  },
-  wideSegmentCell: {
-    flex: 1,
-    position: 'relative',
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(255, 255, 255, 0.35)',
-  },
-  thinNeonDividerLine: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 1,
-    borderWidth: 0.5,
-    borderColor: '#39FF14',
-    borderStyle: 'dashed',
-  },
-  halfSpaceCol: {
-    width: '20%',
-    flexDirection: 'column',
-  },
-  centralChannelCol: {
-    width: '20%',
-    flexDirection: 'column',
-  },
-  boxSpacerTop: {
-    height: 55,
-  },
-  boxSpacerBottom: {
-    height: 55,
-  },
-  boxToBoxSection: {
-    flex: 1,
-    flexDirection: 'column',
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderTopWidth: 1.5,
-    borderBottomWidth: 1.5,
-    borderColor: '#39FF14',
-    borderStyle: 'dashed',
-  },
-  centralHalfTop: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingBottom: 20,
-  },
-  centralHalfBottom: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 20,
-  },
-  corridorHighlightMiddle: {
-    backgroundColor: 'rgba(57, 255, 20, 0.28)',
-    borderColor: '#39FF14',
-    borderWidth: 1.5,
-  },
-  verticalCorridorLabelText: {
-    color: '#FFFFFF',
-    fontSize: 8,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
-    transform: [{ rotate: '-90deg' }],
-  },
-
-  jargonItem: {
-    backgroundColor: '#0B0E14',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2E3A44',
-    marginBottom: 10,
-  },
-  jargonTitle: {
-    color: '#39FF14',
-    fontSize: 13,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  jargonBody: {
-    color: '#CBD5E1',
-    fontSize: 12,
-    lineHeight: 18,
-  },
-
+  pitchCanvasFrame: { width: '100%', marginVertical: 10, alignItems: 'center' },
+  pitchGoalTopFrame: { width: 50, height: 6, backgroundColor: 'rgba(255, 255, 255, 0.85)', borderBottomLeftRadius: 3, borderBottomRightRadius: 3, marginBottom: 2 },
+  pitchGoalBottomFrame: { width: 50, height: 6, backgroundColor: 'rgba(255, 255, 255, 0.85)', borderTopLeftRadius: 3, borderTopRightRadius: 3, marginTop: 2 },
+  pitchTurfBody: { width: '100%', height: 380, backgroundColor: '#0D2B16', borderRadius: 8, borderWidth: 2, borderColor: '#1E4D2B', position: 'relative', overflow: 'hidden' },
+  pitchOuterBoundary: { position: 'absolute', top: 10, bottom: 10, left: 10, right: 10, borderWidth: 1.5, borderColor: 'rgba(255, 255, 255, 0.85)' },
+  pitchHalfwayLine: { position: 'absolute', top: '50%', left: 10, right: 10, height: 1.5, backgroundColor: 'rgba(255, 255, 255, 0.85)' },
+  pitchCenterCircle: { position: 'absolute', top: '50%', left: '50%', width: 70, height: 70, marginLeft: -35, marginTop: -35, borderRadius: 35, borderWidth: 1.5, borderColor: 'rgba(255, 255, 255, 0.85)' },
+  pitchCenterSpot: { position: 'absolute', top: '50%', left: '50%', width: 6, height: 6, marginLeft: -3, marginTop: -3, borderRadius: 3, backgroundColor: '#FFFFFF' },
+  pitchPenaltyBoxTop: { position: 'absolute', top: 10, left: '22%', right: '22%', height: 55, borderWidth: 1.5, borderTopWidth: 0, borderColor: 'rgba(255, 255, 255, 0.85)' },
+  pitchGoalBoxTop: { position: 'absolute', top: 10, left: '36%', right: '36%', height: 20, borderWidth: 1.5, borderTopWidth: 0, borderColor: 'rgba(255, 255, 255, 0.85)' },
+  pitchPenaltySpotTop: { position: 'absolute', top: 48, left: '50%', width: 4, height: 4, marginLeft: -2, borderRadius: 2, backgroundColor: '#FFFFFF' },
+  pitchPenaltyArcTop: { position: 'absolute', top: 50, left: '40%', width: '20%', height: 20, borderRadius: 20, borderWidth: 1.5, borderTopWidth: 0, borderColor: 'rgba(255, 255, 255, 0.85)' },
+  pitchPenaltyBoxBottom: { position: 'absolute', bottom: 10, left: '22%', right: '22%', height: 55, borderWidth: 1.5, borderBottomWidth: 0, borderColor: 'rgba(255, 255, 255, 0.85)' },
+  pitchGoalBoxBottom: { position: 'absolute', bottom: 10, left: '36%', right: '36%', height: 20, borderWidth: 1.5, borderBottomWidth: 0, borderColor: 'rgba(255, 255, 255, 0.85)' },
+  pitchPenaltySpotBottom: { position: 'absolute', bottom: 48, left: '50%', width: 4, height: 4, marginLeft: -2, borderRadius: 2, backgroundColor: '#FFFFFF' },
+  pitchPenaltyArcBottom: { position: 'absolute', bottom: 50, left: '40%', width: '20%', height: 20, borderRadius: 20, borderWidth: 1.5, borderBottomWidth: 0, borderColor: 'rgba(255, 255, 255, 0.85)' },
+  cornerArc: { position: 'absolute', width: 10, height: 10, borderWidth: 1.5, borderColor: 'rgba(255, 255, 255, 0.85)' },
+  pitchOverlayLayer: { position: 'absolute', top: 10, bottom: 10, left: 10, right: 10, zIndex: 10 },
+  pitchOverlayThird: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  pitchZoneBadge: { backgroundColor: 'rgba(11, 14, 20, 0.85)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, alignItems: 'center', borderWidth: 1, borderColor: '#2E3A44' },
+  pitchZoneBadgeText: { fontSize: 12, fontWeight: 'bold', letterSpacing: 1 },
+  pitchZoneSubText: { color: '#CBD5E1', fontSize: 9, fontWeight: 'bold', marginTop: 2 },
+  zoneDescCard: { backgroundColor: '#0B0E14', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44', marginTop: 5 },
+  zoneDescHeading: { fontSize: 12, fontWeight: 'bold' },
+  zoneDescBody: { color: '#CBD5E1', fontSize: 11, lineHeight: 16, marginTop: 2 },
+  grid18Container: { flex: 1 },
+  grid18Row: { flex: 1, flexDirection: 'row' },
+  grid18Cell: { flex: 1, justifyContent: 'center', alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(255, 255, 255, 0.25)', borderStyle: 'dashed' },
+  grid18BoxCell: { backgroundColor: 'rgba(59, 130, 246, 0.12)' },
+  grid18GoldenCell: { backgroundColor: 'rgba(57, 255, 20, 0.35)', borderColor: '#39FF14', borderWidth: 2, borderRadius: 4 },
+  grid18Text: { color: '#FFFFFF', fontSize: 11, fontWeight: 'bold' },
+  grid18GoldenText: { color: '#39FF14', fontSize: 12, fontWeight: 'bold' },
+  corridorHeaderLabelBar: { flexDirection: 'row', width: '100%', backgroundColor: '#0B0E14', paddingVertical: 8, paddingHorizontal: 4, borderRadius: 6, borderWidth: 1, borderColor: '#2E3A44', marginBottom: 8 },
+  corridorLabelText: { flex: 1, color: '#94A3B8', fontSize: 8, fontWeight: 'bold', textAlign: 'center' },
+  proCorridorCanvasContainer: { flex: 1, flexDirection: 'row' },
+  wideChannelCol: { width: '20%', flexDirection: 'column' },
+  wideSegmentCell: { flex: 1, position: 'relative', borderRightWidth: 1, borderRightColor: 'rgba(255, 255, 255, 0.35)' },
+  thinNeonDividerLine: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 1, borderWidth: 0.5, borderColor: '#39FF14', borderStyle: 'dashed' },
+  halfSpaceCol: { width: '20%', flexDirection: 'column' },
+  centralChannelCol: { width: '20%', flexDirection: 'column' },
+  boxSpacerTop: { height: 55 },
+  boxSpacerBottom: { height: 55 },
+  boxToBoxSection: { flex: 1, flexDirection: 'column', borderLeftWidth: 1, borderRightWidth: 1, borderTopWidth: 1.5, borderBottomWidth: 1.5, borderColor: '#39FF14', borderStyle: 'dashed' },
+  centralHalfTop: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 20 },
+  centralHalfBottom: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 20 },
+  corridorHighlightMiddle: { backgroundColor: 'rgba(57, 255, 20, 0.28)', borderColor: '#39FF14', borderWidth: 1.5 },
+  verticalCorridorLabelText: { color: '#FFFFFF', fontSize: 8, fontWeight: 'bold', letterSpacing: 0.5, transform: [{ rotate: '-90deg' }] },
+  jargonItem: { backgroundColor: '#0B0E14', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#2E3A44', marginBottom: 10 },
+  jargonTitle: { color: '#39FF14', fontSize: 13, fontWeight: 'bold', marginBottom: 4 },
+  jargonBody: { color: '#CBD5E1', fontSize: 12, lineHeight: 18 },
   radarCardBox: { backgroundColor: '#1A1F26', borderRadius: 12, padding: 16, marginBottom: 15, borderWidth: 1, borderColor: '#2E3A44', alignItems: 'center' },
   radarGraphicContainer: { width: 240, height: 240, justifyContent: 'center', alignItems: 'center', marginVertical: 20, position: 'relative' },
   radarGridRing: { position: 'absolute', borderRadius: 120, borderWidth: 1, borderColor: '#2E3A44' },
@@ -1439,7 +1314,6 @@ const styles = StyleSheet.create({
   radarLegendRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', width: '100%', borderTopWidth: 1, borderTopColor: '#2E3A44', paddingTop: 10 },
   legendText: { color: '#CBD5E1', fontSize: 11, fontWeight: 'bold' },
   sectionSubHeader: { color: '#39FF14', fontSize: 11, fontWeight: 'bold', letterSpacing: 0.5, marginBottom: 6 },
-
   rsvpBtn: { padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 10 },
   rsvpActive: { backgroundColor: '#15803D' },
   rsvpInactive: { backgroundColor: '#991B1B' },

@@ -18,7 +18,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import YoutubePlayer from 'react-native-youtube-iframe';
 import { supabase } from '../supabase';
@@ -86,6 +86,8 @@ import TrainingScreen from '../screens/TrainingScreen';
 import { useMatchdayStore } from '../store/useMatchdayStore';
 
 export default function App() {
+  const insets = useSafeAreaInsets();
+  
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -98,22 +100,20 @@ export default function App() {
   // YouTube Modal State
   const [activeVideoId, setActiveVideoId] = useState(null);
 
-  // Multi-Team & Role Entitlement State
+  // Multi-Team & Context-Pill Architecture State
   const [myTeams, setMyTeams] = useState([]);
   const [activeTeamId, setActiveTeamId] = useState(null);
-  const [userStaffLinks, setUserStaffLinks] = useState([]);
-  const [userParentLinks, setUserParentLinks] = useState([]);
+  const [availableContexts, setAvailableContexts] = useState([]);
+  const [activeContext, setActiveContext] = useState(null);
   const [teamName, setTeamName] = useState('');
   const [teamAgeGroup, setTeamAgeGroup] = useState('U16'); 
   const [teamLogoUrl, setTeamLogoUrl] = useState('');
+  
+  // Team Creation Modals
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamAgeGroup, setNewTeamAgeGroup] = useState('U16');
-  
-  // Staff Management Modal State
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
-
-  // Creation Role State
   const [selectedCreationRole, setSelectedCreationRole] = useState('coach');
 
   // 2-Step Team Deletion State
@@ -138,7 +138,7 @@ export default function App() {
   const [familyCodeInput, setFamilyCodeInput] = useState('');
 
   // App Layout State
-  const [appMode, setAppMode] = useState('coach'); 
+  const [appMode, setAppMode] = useState('coach');
   const [currentTab, setCurrentTab] = useState('coachHub'); 
   const [playerTab, setPlayerTab] = useState('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -154,8 +154,6 @@ export default function App() {
   const [activeFormation, setActiveFormation] = useState('4-2-3-1');
   const [isFormationModalOpen, setIsFormationModalOpen] = useState(false);
   const [lineupViewMode, setLineupViewMode] = useState('pitch');
-
-  // Squad Depth Role Filter State
   const [squadDepthFilter, setSquadDepthFilter] = useState('primary');
 
   // TAFE Engine State
@@ -220,7 +218,7 @@ export default function App() {
     onPlayer: null
   });
   const [isHalfTimeSubModalOpen, setIsHalfTimeSubModalOpen] = useState(false);
-  const [pendingHalfTimeSubs, setPendingHalfTimeSubs] = useState<Array<{ offPlayer: any; onPlayer: any; reason: string }>>([]);
+  const [pendingHalfTimeSubs, setPendingHalfTimeSubs] = useState([]);
 
   // FA League Table WebView State
   const [faLeagueUrl, setFaLeagueUrl] = useState('');
@@ -263,7 +261,6 @@ export default function App() {
   const [isLoadingSheet, setIsLoadingSheet] = useState(true);
   const [activePlayerId, setActivePlayerId] = useState(null);
   const [myChildId, setMyChildId] = useState(null);
-
   const [isRsvpListExpanded, setIsRsvpListExpanded] = useState(false);
 
   // Dynamic Team & Age Group Resolution
@@ -272,30 +269,14 @@ export default function App() {
   const isAdultTeam = String(effectiveAgeGroup).toLowerCase().includes('adult');
   const is9v9Team = String(effectiveAgeGroup).toUpperCase() === 'U13';
 
-  // 🛡️ SUPERUSER & CONTEXTUAL PERMISSIONS
+  // 🛡️ SUPERUSER & STRICT CONTEXTUAL PERMISSIONS
   const isSuperUser = 
     profile?.role === 'superuser' || 
     session?.user?.email?.toLowerCase() === 'darrell.clarke@me.com';
 
-  const isStaffForActiveTeam = 
-    isSuperUser || 
-    activeTeamObj?.created_by === session?.user?.id || 
-    userStaffLinks.some(s => s.team_id === activeTeamId);
-
-  const isParentForActiveTeam = 
-    myLinkedPlayers.length > 0 || 
-    userParentLinks.some(p => p.team_id === activeTeamId);
-
-  // Contextual Role Auto-Adjustment
-  useEffect(() => {
-    if (!profile || !profile.role_configured) return;
-    if (isSuperUser) return;
-
-    if (!isStaffForActiveTeam && appMode === 'coach') {
-      setAppMode('parent');
-      setCurrentTab('player');
-    }
-  }, [activeTeamId, isStaffForActiveTeam, isSuperUser]);
+  const isStaffForActiveTeam = activeContext?.role === 'coach' || activeContext?.role === 'assistant' || activeContext?.role === 'admin' || isSuperUser;
+  const isParentForActiveTeam = activeContext?.role === 'parent';
+  const isPlayerForActiveTeam = activeContext?.role === 'player';
 
   const activeLayout = formationLayouts[activeFormation] || formationLayouts['4-2-3-1'];
   const currentAvailablePositions = activeLayout.map(node => node.code);
@@ -306,7 +287,6 @@ export default function App() {
   const myChild = (teamSheet || []).find(p => p && p.id === myChildId) || {};
   
   const hasSecondaryRole = activePlayer?.secondary_position && activePlayer.secondary_position !== 'None';
-  
   const rawRoleCode = viewingRoleToggle === 'primary' ? activePlayer?.position : activePlayer?.secondary_position;
   const subRoleOptions = getSubRoleOptions(rawRoleCode);
   const isGroupedRole = subRoleOptions.length > 1;
@@ -330,9 +310,7 @@ export default function App() {
 
   const gkPlayers = (teamSheet || []).filter(p => p && getPosCategory(p.position) === 'GK');
   const outfieldPlayers = (teamSheet || []).filter(p => p && getPosCategory(p.position) !== 'GK');
-
   const activeWeekData = seasonCurriculum[selectedWeek] || {};
-
   const totalTeamApps = (teamSheet || []).reduce((sum, p) => sum + (p.apps || 0), 0);
   const isTafeDisabled = totalTeamApps === 0;
 
@@ -348,127 +326,6 @@ export default function App() {
   }, [activeVideoId]);
 
   const initialUrl = Linking.useURL();
-
-  // 🔗 UNIVERSAL CODE REDEMPTION LOGIC
-  async function handleJoinCode(inputCode) {
-    if (!inputCode || !inputCode.trim()) {
-      Alert.alert("Input Required", "Please enter a valid Join Code.");
-      return false;
-    }
-    const cleanCode = inputCode.trim().toUpperCase();
-    setLoading(true);
-
-    const markRoleConfigured = async (roleType) => {
-      if (profile && !profile.role_configured) {
-        await supabase.from('profiles').update({ role_configured: true, role: roleType }).eq('id', session.user.id);
-      }
-    };
-
-    try {
-      const { data: headTeam } = await supabase.from('teams').select('*').eq('invite_code', cleanCode).maybeSingle();
-      if (headTeam) {
-        await supabase.from('team_staff').upsert([{ team_id: headTeam.id, user_id: session.user.id, role: 'coach' }], { onConflict: 'team_id,user_id' });
-        setActiveTeamId(headTeam.id);
-        await markRoleConfigured('coach');
-        await fetchUserProfile(session.user.id);
-        Alert.alert("Team Linked! ⚽", `You have successfully joined ${headTeam.name} as Head Coach.`);
-        return true;
-      }
-
-      const { data: staffTeam } = await supabase.from('teams').select('*').eq('staff_code', cleanCode).maybeSingle();
-      if (staffTeam) {
-        await supabase.from('team_staff').upsert([{ team_id: staffTeam.id, user_id: session.user.id, role: 'assistant' }], { onConflict: 'team_id,user_id' });
-        setActiveTeamId(staffTeam.id);
-        await markRoleConfigured('assistant');
-        await fetchUserProfile(session.user.id);
-        Alert.alert("Team Linked! ⚽", `You have successfully joined ${staffTeam.name} as Assistant Coach.`);
-        return true;
-      }
-
-      const { data: adminTeam } = await supabase.from('teams').select('*').eq('admin_code', cleanCode).maybeSingle();
-      if (adminTeam) {
-        await supabase.from('team_staff').upsert([{ team_id: adminTeam.id, user_id: session.user.id, role: 'admin' }], { onConflict: 'team_id,user_id' });
-        setActiveTeamId(adminTeam.id);
-        await markRoleConfigured('admin');
-        await fetchUserProfile(session.user.id);
-        Alert.alert("Team Linked! 📋", `You have successfully joined ${adminTeam.name} as Team Administrator.`);
-        return true;
-      }
-
-      const { data: player } = await supabase.from('players').select('*, teams(id, name)').eq('family_code', cleanCode).maybeSingle();
-      if (player) {
-        await supabase.from('parent_players').upsert([{ player_id: player.id, parent_id: session.user.id, is_primary: true }], { onConflict: 'player_id,parent_id' });
-        if (player.team_id) setActiveTeamId(player.team_id);
-        setMyChildId(player.id);
-        await markRoleConfigured('parent');
-        await fetchUserProfile(session.user.id);
-        const teamTitle = player.teams?.name || 'Squad';
-        Alert.alert("Player Linked! 🌟", `Successfully linked ${player.name} (${teamTitle}) to your account.`);
-        return true;
-      }
-
-      const { data: fanTeam } = await supabase.from('teams').select('*').eq('fan_code', cleanCode).maybeSingle();
-      if (fanTeam) {
-        setActiveTeamId(fanTeam.id);
-        await markRoleConfigured('fan');
-        await fetchUserProfile(session.user.id);
-        Alert.alert("Joined as Fan! 📣", `You are now following ${fanTeam.name}.`);
-        return true;
-      }
-
-      Alert.alert("Invalid Code", `No team or player found with code: ${cleanCode}. Please verify with your Head Coach.`);
-      return false;
-    } catch (err) {
-      Alert.alert("Linking Error", err?.message || "Failed to join team.");
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Deep Link Interception (Cold Start)
-  useEffect(() => {
-    if (initialUrl) {
-      const parsed = Linking.parse(initialUrl);
-      const codeParam = parsed.queryParams?.code;
-      if (codeParam) {
-        const cleanCode = String(codeParam).trim().toUpperCase();
-        if (!session) {
-          setFamilyCodeInput(cleanCode);
-          setOnboardingStep('parent_notice'); 
-        } else {
-          Alert.alert(
-            "Team Invite Detected",
-            `Would you like to add the team associated with code "${cleanCode}" to your account?`,
-            [
-              { text: "Cancel", style: "cancel" },
-              { text: "Join Team", onPress: () => handleJoinCode(cleanCode) }
-            ]
-          );
-        }
-      }
-    }
-  }, [initialUrl, session]);
-
-  // Deep Link Interception (Background)
-  useEffect(() => {
-    const sub = Linking.addEventListener('url', ({ url }) => {
-      const parsed = Linking.parse(url);
-      const codeParam = parsed.queryParams?.code;
-      if (codeParam && session) {
-        const cleanCode = String(codeParam).trim().toUpperCase();
-        Alert.alert(
-          "Team Invite Detected",
-          `Would you like to add the team associated with code "${cleanCode}" to your account?`,
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Join Team", onPress: () => handleJoinCode(cleanCode) }
-          ]
-        );
-      }
-    });
-    return () => sub.remove();
-  }, [session]);
 
   const openDrillVideo = (url) => {
     const videoId = getYouTubeId(url);
@@ -501,7 +358,6 @@ export default function App() {
         const ssgs = mappedDrills.filter(d => d.bucket === 4);
 
         setTrainingLibrary({ warmups, rondos, drills: mainDrills, ssgs });
-
         if (warmups.length > 0) setSelectedWarmup(warmups[0]);
         if (rondos.length > 0) setSelectedDrill1(rondos[0]);
         if (mainDrills.length > 0) setSelectedDrill2(mainDrills[0]);
@@ -512,7 +368,6 @@ export default function App() {
         if (currData && currData.length > 0) {
           const drillMap = new Map(mappedDrills.map(d => [d.id, d]));
           const builtCurriculum = {};
-
           currData.forEach(row => {
             const w = row.week_number;
             const wUp = drillMap.get(row.warm_up_id);
@@ -520,22 +375,19 @@ export default function App() {
             const mainD = drillMap.get(row.main_drill_id);
             const ssg = drillMap.get(row.ssg_id);
 
-            const weekPhases = [
-              wUp ? { ...wUp, title: `Phase 1: Warm-Up (${wUp.title})` } : null,
-              rondo ? { ...rondo, title: `Phase 2: Rondo (${rondo.title})` } : null,
-              mainD ? { ...mainD, title: `Phase 3: Main Drill (${mainD.title})` } : null,
-              ssg ? { ...ssg, title: `Phase 4: SSG (${ssg.title})` } : null
-            ].filter(Boolean);
-
             builtCurriculum[w] = {
               theme: `${row.phase_name} - ${row.focus_theme}`,
               principle: mainD?.title || 'Tactical Execution',
               question: mainD?.tactical_objective || 'How do we exploit space under pressure?',
               overviewVideoUrl: mainD?.video_url || rondo?.video_url,
-              phases: weekPhases
+              phases: [
+                wUp ? { ...wUp, title: `Phase 1: Warm-Up (${wUp.title})` } : null,
+                rondo ? { ...rondo, title: `Phase 2: Rondo (${rondo.title})` } : null,
+                mainD ? { ...mainD, title: `Phase 3: Main Drill (${mainD.title})` } : null,
+                ssg ? { ...ssg, title: `Phase 4: SSG (${ssg.title})` } : null
+              ].filter(Boolean)
             };
           });
-
           setSeasonCurriculum(builtCurriculum);
         }
       }
@@ -545,12 +397,10 @@ export default function App() {
         supabase.from('tactical_quizzes').select('*').range(0, 1199),
         supabase.from('tactical_quizzes').select('*').range(1200, 2400)
       ]);
-
       const quizzesData = [...(batch1.data || []), ...(batch2.data || [])];
 
       if (rolesData && quizzesData) {
         const builtManual = {};
-
         const shuffleArray = (arr) => {
           const list = [...arr];
           for (let i = list.length - 1; i > 0; i--) {
@@ -562,14 +412,12 @@ export default function App() {
 
         rolesData.forEach(r => {
           const rawCode = (r.role_code || r.code || '').toUpperCase();
-
           const roleQuizzes = quizzesData.filter(q => q.role_code === r.role_code).map(q => {
             const rawOptions = [
               { text: q.option_a, isCorrect: q.correct_option === 'A' },
               { text: q.option_b, isCorrect: q.correct_option === 'B' },
               { text: q.option_c, isCorrect: q.correct_option === 'C' }
             ];
-
             return {
               question: q.question,
               options: shuffleArray(rawOptions),
@@ -588,7 +436,6 @@ export default function App() {
           };
           
           builtManual[rawCode] = roleObj;
-
           if (rawCode === 'CAM') builtManual['CAM/CF'] = roleObj;
           if (rawCode === 'GK') builtManual['GK/SGK'] = roleObj;
           if (rawCode === 'LB') builtManual['LB/LWB'] = roleObj;
@@ -605,7 +452,6 @@ export default function App() {
           creatingSpace: 'No tactical data found in Supabase.',
           quizzes: []
         };
-
         setTacticalManual(builtManual);
       }
     } catch (err) {
@@ -613,16 +459,23 @@ export default function App() {
     }
   };
 
-  // 📡 REALTIME BROADCAST DISPATCHERS
+  // 📡 REALTIME COLLABORATIVE MATCH ENGINE - AUTO SAVE & BROADCAST
   async function broadcastMatchSync(statePayload) {
     if (!activeTeamId) return;
     try {
+      // 1. Instant peer-to-peer broadcast across team channel
       const channel = supabase.channel(`team-realtime-${activeTeamId}`);
       await channel.send({
         type: 'broadcast',
         event: 'match_state_sync',
         payload: statePayload
       });
+      
+      // 2. Commit live match state directly to Supabase
+      await supabase.from('teams').update({
+         live_match_state: statePayload
+      }).eq('id', activeTeamId);
+      
     } catch (err) {
       console.warn("Peer broadcast notice:", err?.message);
     }
@@ -655,31 +508,7 @@ export default function App() {
       .order('created_at', { ascending: false })
       .limit(30);
 
-    if (data) {
-      setLiveTicker(data || []);
-
-      if (data.length > 0) {
-        const kickoffEvt = data.find(e => e.message && e.message.includes('Kick-Off vs'));
-        if (kickoffEvt) {
-          const matchDetails = kickoffEvt.message.match(/Kick-Off vs (.*?) \[(.*?) MATCH\]/);
-          if (matchDetails) {
-            setOpponentName(matchDetails[1]);
-            setMatchType(matchDetails[2].toLowerCase());
-          }
-        }
-
-        const latestWhistle = data.find(e => e.icon === '⏱️' || e.icon === '🛑' || e.icon === '🏁');
-        if (latestWhistle) {
-          if (latestWhistle.message.includes('2nd Half Kick-Off')) {
-            if (matchPhase !== '2ND HALF') setMatchPhase('2ND HALF');
-          } else if (latestWhistle.message.includes('Half-Time')) {
-            if (matchPhase !== 'HALF-TIME') setMatchPhase('HALF-TIME');
-          } else if (latestWhistle.message.includes('1st Half Kick-Off')) {
-            if (matchPhase !== '1ST HALF') setMatchPhase('1ST HALF');
-          }
-        }
-      }
-    }
+    if (data) setLiveTicker(data || []);
   }
 
   async function fetchMatchHistory(teamId) {
@@ -707,8 +536,7 @@ export default function App() {
       setSeasonReports(data);
     }
   }
-
-  // 🌐 MULTI-TEAM DATA SYNC & PUSH TOKEN REGISTRATION
+  // 🌐 MULTI-ROLE CONTEXT RESOLVER & UNIVERSAL TOKEN REGISTRATION
   async function fetchUserProfile(userId) {
     setLoading(true);
     const startTime = Date.now();
@@ -724,55 +552,103 @@ export default function App() {
         setProfile(profileData);
       }
 
+      // Universal Push Token Registration for all accounts (Parents, Staff, Players)
       registerForPushNotificationsAsync(userId);
 
-      // 1. Staff Teams
+      // 1. Fetch Staff Memberships
       const { data: staffLinks } = await supabase
         .from('team_staff')
-        .select('team_id, role')
+        .select('team_id, role, teams(*)')
         .eq('user_id', userId);
-      setUserStaffLinks(staffLinks || []);
-      const staffTeamIds = (staffLinks || []).map(s => s.team_id);
 
-      // 2. Parent / Player Teams
+      // 2. Fetch Parent Linked Children (Supports Multi-Child)
       const { data: parentLinks } = await supabase
         .from('parent_players')
-        .select('player_id')
+        .select('player_id, is_primary, players(*, teams(*))')
         .eq('parent_id', userId);
 
-      let parentTeamIds = [];
-      if (parentLinks && parentLinks.length > 0) {
-        const playerIds = parentLinks.map(p => p.player_id);
-        const { data: linkedPlayers } = await supabase
-          .from('players')
-          .select('team_id, id')
-          .in('id', playerIds);
-        setUserParentLinks(linkedPlayers || []);
-        parentTeamIds = (linkedPlayers || []).map(p => p.team_id).filter(Boolean);
-      }
+      // 3. Fetch Direct Player Memberships (Dedicated Player Login)
+      const { data: playerLinks } = await supabase
+        .from('players')
+        .select('*, teams(*)')
+        .eq('user_id', userId);
 
-      const allUniqueTeamIds = Array.from(new Set([...staffTeamIds, ...parentTeamIds]));
+      const resolvedTeams = [];
+      const contexts = [];
 
-      let teamQuery = supabase.from('teams').select('*');
-      if (allUniqueTeamIds.length > 0) {
-        teamQuery = teamQuery.or(`created_by.eq.${userId},id.in.(${allUniqueTeamIds.join(',')})`);
-      } else {
-        teamQuery = teamQuery.eq('created_by', userId);
-      }
+      // Build Staff Contexts
+      (staffLinks || []).forEach(s => {
+        if (s.teams) {
+          if (!resolvedTeams.some(t => t.id === s.teams.id)) resolvedTeams.push(s.teams);
+          contexts.push({
+            id: `staff-${s.teams.id}-${s.role}`,
+            teamId: s.teams.id,
+            teamName: s.teams.name,
+            ageGroup: s.teams.age_group || 'Youth',
+            role: s.role, // 'coach' | 'assistant' | 'admin'
+            label: `⚽ ${s.role === 'coach' ? 'Coach' : s.role === 'admin' ? 'Admin' : 'Asst'}: ${s.teams.name}`,
+            childId: null
+          });
+        }
+      });
 
-      const { data: teamsData } = await teamQuery;
+      // Build Parent Contexts (Scoped strictly per linked child)
+      (parentLinks || []).forEach(p => {
+        const child = p.players;
+        if (child && child.teams) {
+          if (!resolvedTeams.some(t => t.id === child.teams.id)) resolvedTeams.push(child.teams);
+          contexts.push({
+            id: `parent-${child.id}`,
+            teamId: child.teams.id,
+            teamName: child.teams.name,
+            ageGroup: child.teams.age_group || 'Youth',
+            role: 'parent',
+            label: `👨‍👩‍👦 Parent: ${child.name} (${child.teams.name})`,
+            childId: child.id,
+            childName: child.name
+          });
+        }
+      });
 
-      if (teamsData && teamsData.length > 0) {
-        setMyTeams(teamsData);
-        const resolvedTeamId = activeTeamId && teamsData.some(t => t.id === activeTeamId)
-          ? activeTeamId
-          : teamsData[0].id;
+      // Build Dedicated Player Contexts
+      (playerLinks || []).forEach(pl => {
+        if (pl.teams) {
+          if (!resolvedTeams.some(t => t.id === pl.teams.id)) resolvedTeams.push(pl.teams);
+          contexts.push({
+            id: `player-${pl.id}`,
+            teamId: pl.teams.id,
+            teamName: pl.teams.name,
+            ageGroup: pl.teams.age_group || 'Youth',
+            role: 'player',
+            label: `🏃 Player: ${pl.name} (${pl.teams.name})`,
+            childId: pl.id,
+            childName: pl.name
+          });
+        }
+      });
 
-        setActiveTeamId(resolvedTeamId);
-        const activeTeam = teamsData.find(t => t.id === resolvedTeamId);
-        if (activeTeam?.age_group) setTeamAgeGroup(activeTeam.age_group);
-      } else {
-        setMyTeams([]);
+      setMyTeams(resolvedTeams);
+      setAvailableContexts(contexts);
+
+      // Restore or initialize active context
+      let selectedCtx = contexts.find(c => c.teamId === activeTeamId) || contexts[0] || null;
+      if (selectedCtx) {
+        setActiveContext(selectedCtx);
+        setActiveTeamId(selectedCtx.teamId);
+        setTeamAgeGroup(selectedCtx.ageGroup);
+        if (selectedCtx.childId) setMyChildId(selectedCtx.childId);
+        
+        // Lock app mode strictly according to the context role
+        if (selectedCtx.role === 'parent') {
+          setAppMode('parent');
+          setCurrentTab('player');
+        } else if (selectedCtx.role === 'player') {
+          setAppMode('player');
+          setCurrentTab('player');
+        } else {
+          setAppMode('coach');
+          setCurrentTab('coachHub');
+        }
       }
     } catch (err) {
       console.error("Critical Error in fetchUserProfile:", err);
@@ -783,11 +659,36 @@ export default function App() {
     }
   }
 
+  // Active Context Switcher (Tapping Context Pills)
+  const switchContext = (ctx) => {
+    setActiveContext(ctx);
+    setActiveTeamId(ctx.teamId);
+    setTeamAgeGroup(ctx.ageGroup);
+    if (ctx.childId) {
+      setMyChildId(ctx.childId);
+      setActivePlayerId(ctx.childId);
+    }
+
+    if (ctx.role === 'parent' || ctx.role === 'player') {
+      setAppMode(ctx.role);
+      setCurrentTab('player');
+    } else {
+      setAppMode('coach');
+      setCurrentTab('coachHub');
+    }
+
+    fetchTeamData(session?.user?.id, ctx.teamId, ctx.role, ctx.childId);
+    hydrateActiveMatchState(ctx.teamId);
+  };
+
   async function handleSignOut() {
     setSession(null);
     setProfile(null);
     setMyTeams([]);
     setActiveTeamId(null);
+    setActiveContext(null);
+    setAvailableContexts([]);
+    resetMatchState();
     try {
       await supabase.auth.signOut();
     } catch (err) {
@@ -841,6 +742,34 @@ export default function App() {
       setLoading(false);
     }
   }
+
+  // Active Match Recovery (Hydration on Login / App Launch)
+  const hydrateActiveMatchState = async (teamId) => {
+    if (!teamId) return;
+    try {
+      const { data: teamData } = await supabase
+        .from('teams')
+        .select('live_match_state')
+        .eq('id', teamId)
+        .single();
+
+      if (teamData && teamData.live_match_state) {
+        const state = teamData.live_match_state;
+        if (state.matchPhase && state.matchPhase !== 'PRE-MATCH') {
+          setMatchPhase(state.matchPhase);
+          if (state.opponentName) setOpponentName(state.opponentName);
+          if (state.matchType) setMatchType(state.matchType);
+          if (state.teamScore !== undefined) setTeamScore(state.teamScore);
+          if (state.opponentScore !== undefined) setOpponentScore(state.opponentScore);
+          if (state.accumulatedSeconds !== undefined) setAccumulatedSeconds(state.accumulatedSeconds);
+          if (state.displaySeconds !== undefined) setDisplaySeconds(state.displaySeconds);
+          if (state.matchStartTimestamp) setMatchStartTimestamp(state.matchStartTimestamp);
+        }
+      }
+    } catch (e) {
+      console.warn("Hydration warning:", e);
+    }
+  };
 
   useEffect(() => {
     let initialMount = true;
@@ -909,13 +838,13 @@ export default function App() {
     }
   }, [appMode, effectiveAgeGroup, playerTab]);
 
-  // ⚡ SUPABASE REALTIME WEBSOCKET LISTENERS
+  // ⚡ SUPABASE REALTIME WEBSOCKET LISTENERS & COLLABORATIVE SYNC
   useEffect(() => {
     if (!activeTeamId) return;
 
     supabase
       .from('teams')
-      .select('fa_league_table_url, age_group, logo_url, default_formation')
+      .select('fa_league_table_url, age_group, logo_url, default_formation, live_match_state')
       .eq('id', activeTeamId)
       .single()
       .then(({ data }) => {
@@ -927,13 +856,15 @@ export default function App() {
 
           const is9v9 = String(ageGrp).toUpperCase() === 'U13';
           const teamFmt = data.default_formation || (is9v9 ? '3-3-2' : '4-2-3-1');
-
           setActiveFormation(teamFmt);
-          setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, default_formation: teamFmt, age_group: ageGrp } : t));
+
+          if (data.live_match_state) {
+            hydrateActiveMatchState(activeTeamId);
+          }
         }
       });
 
-    fetchTeamData(session?.user?.id, activeTeamId);
+    fetchTeamData(session?.user?.id, activeTeamId, activeContext?.role, activeContext?.childId);
     fetchMatchNotes(activeTeamId);
     fetchLiveTicker(activeTeamId);
     fetchMatchHistory(activeTeamId);
@@ -954,22 +885,17 @@ export default function App() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'players', filter: `team_id=eq.${activeTeamId}` },
-        () => fetchTeamData(session?.user?.id, activeTeamId)
+        () => fetchTeamData(session?.user?.id, activeTeamId, activeContext?.role, activeContext?.childId)
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'match_notes', filter: `team_id=eq.${activeTeamId}` },
         () => fetchMatchNotes(activeTeamId)
       )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'parent_players' },
-        () => fetchTeamData(session?.user?.id, activeTeamId)
-      )
       .on('broadcast', { event: 'match_state_sync' }, ({ payload }) => {
         if (!payload) return;
         if (payload.formationChanged) setActiveFormation(payload.newFormation);
-        if (payload.lineupAdjusted) fetchTeamData(session?.user?.id, activeTeamId);
+        if (payload.lineupAdjusted) fetchTeamData(session?.user?.id, activeTeamId, activeContext?.role, activeContext?.childId);
         if (payload.matchPhase !== undefined) setMatchPhase(payload.matchPhase);
         if (payload.opponentName !== undefined) setOpponentName(payload.opponentName);
         if (payload.matchType !== undefined) setMatchType(payload.matchType);
@@ -984,7 +910,7 @@ export default function App() {
     return () => {
       supabase.removeChannel(liveChannel);
     };
-  }, [activeTeamId, session?.user?.id]);
+  }, [activeTeamId, session?.user?.id, activeContext]);
 
   useEffect(() => {
     let interval;
@@ -1011,7 +937,7 @@ export default function App() {
     setCurrentTab(mode === 'coach' ? 'coachHub' : 'player');
   };
 
-  // ⏱️ MATCH PHASE CONTROLLER WITH REALTIME BROADCASTING
+  // ⏱️ MATCH PHASE CONTROLLER WITH ADVANCE PREP & FULL-TIME POTM AUDIT
   const handlePhaseChange = () => {
     if (!activeTeamId) return;
 
@@ -1179,155 +1105,38 @@ export default function App() {
         }}
       ]);
     } else if (matchPhase === '2ND HALF') {
-      Alert.alert("Full Time", "Blow the final whistle? This will save the match report and clear the live ticker for the next game.", [
+      Alert.alert("Full Time", "Blow the final whistle? This will stop the match clock and finalize the fixture.", [
         { text: "Cancel", style: "cancel" },
         { text: "End Match", style: "destructive", onPress: async () => {
-          setMatchPhase('FULL-TIME');
-          setAccumulatedSeconds(displaySeconds);
+          // 1. Immediately halt the match clock
           setMatchStartTimestamp(null);
-          
-          feedbackFulltimeWhistle();
-          await broadcastEvent('🏁', 'Full-Time Whistle!');
+          setAccumulatedSeconds(displaySeconds);
 
-          broadcastMatchSync({
-            matchPhase: 'FULL-TIME',
-            matchStartTimestamp: null,
-            accumulatedSeconds: displaySeconds
-          });
+          // 2. Check if a Coach's POTM has been awarded during this game
+          const hasAwardedCoachPotm = (teamSheet || []).some(p => (p.motm || 0) > 0) ||
+            (liveTicker || []).some(e => e.icon === '⭐' && e.message && e.message.includes("COACH'S POTM"));
 
-          dispatchTeamMatchNotification({
-            teamId: activeTeamId,
-            senderUserId: session?.user?.id,
-            title: `🏁 Full-Time: ${teamScore} - ${opponentScore} vs ${opponentName}`,
-            body: `Final whistle! Result: ${teamScore} - ${opponentScore}. Tap to vote for Player of the Match! ⭐`,
-            data: { eventType: 'fulltime' }
-          });
-          
-          // 🌟 FANS' POTM TALLY WITH TIE SUPPORT & TYPE-SAFE ID MATCHING
-          const { data: votes } = await supabase
-            .from('parent_motm_votes')
-            .select('player_id')
-            .eq('team_id', activeTeamId);
-
-          const winningPlayerIds = [];
-
-          if (votes && votes.length > 0) {
-            const voteCounts = {};
-            let maxVotes = 0;
-
-            votes.forEach((v) => {
-              const pid = String(v.player_id);
-              voteCounts[pid] = (voteCounts[pid] || 0) + 1;
-              if (voteCounts[pid] > maxVotes) {
-                maxVotes = voteCounts[pid];
-              }
-            });
-
-            if (maxVotes > 0) {
-              Object.keys(voteCounts).forEach((pid) => {
-                if (voteCounts[pid] === maxVotes) {
-                  winningPlayerIds.push(pid);
+          if (!hasAwardedCoachPotm) {
+            // Prompt coach to pick POTM before ending
+            Alert.alert(
+              "⭐ Coach's Player of the Match",
+              "You have not appointed a Coach's Player of the Match yet. Please select who earned it today before finalizing.",
+              [
+                {
+                  text: "Skip Award",
+                  style: "cancel",
+                  onPress: () => finalizeFullTimeMatch()
+                },
+                {
+                  text: "Select Player ➔",
+                  onPress: () => {
+                    setLiveEventMode('coach_motm');
+                  }
                 }
-              });
-
-              const winningPlayers = (teamSheet || []).filter((p) =>
-                winningPlayerIds.includes(String(p.id))
-              );
-
-              // Increment stat for every tied winner
-              for (const winner of winningPlayers) {
-                await adjustMatchStat(winner, 'parent_motm', 1);
-              }
-
-              if (winningPlayers.length === 1) {
-                await broadcastEvent(
-                  '🌟',
-                  `FANS' POTM: ${winningPlayers[0].name} (${maxVotes} Vote${maxVotes > 1 ? 's' : ''})`
-                );
-              } else if (winningPlayers.length > 1) {
-                const names = winningPlayers.map((w) => w.name).join(' & ');
-                await broadcastEvent(
-                  '🌟',
-                  `FANS' JOINT POTM: ${names} (${maxVotes} Votes Each)`
-                );
-              }
-            }
-          }
-          
-          let resultStr = 'D';
-          if (teamScore > opponentScore) resultStr = 'W';
-          if (teamScore < opponentScore) resultStr = 'L';
-          
-          const matchPayload = {
-            team_id: activeTeamId,
-            opponent_name: opponentName || 'Opponent',
-            match_type: matchType,
-            team_score: teamScore,
-            opponent_score: opponentScore,
-            result: resultStr,
-            ticker_events: liveTicker || []
-          };
-
-          const { error: insertErr } = await supabase.from('match_history').insert([matchPayload]);
-          if (!insertErr) {
-            await supabase.from('live_ticker').delete().eq('team_id', activeTeamId);
-            await supabase.from('parent_motm_votes').delete().eq('team_id', activeTeamId);
-
-            resetMatchState();
-            setPendingHalfTimeSubs([]);
-
-            Alert.alert("Match Finalized", "Report saved to Match Archive! Live pitch reset for your next match.");
-            fetchMatchHistory(activeTeamId);
-          }
-
-          const newTracker = { ...playerMinutesTracker };
-          const finalUpdates = [];
-          const updatedSheet = [...teamSheet];
-
-          updatedSheet.forEach(p => {
-            let mins2ndHalf = 0;
-            let currentPosMins = { ...(p.position_minutes || {}) };
-
-            if (p.is_starter && p.available && newTracker[p.id]) {
-              const elapsed2ndHalf = displaySeconds - (newTracker[p.id].lastOn || displaySeconds);
-              newTracker[p.id].totalSeconds += elapsed2ndHalf;
-              mins2ndHalf = Math.floor(elapsed2ndHalf / 60);
-            }
-            
-            if (mins2ndHalf > 0) {
-              const posPlayed = p.matchday_position;
-              if (posPlayed && posPlayed !== 'Bench') {
-                 currentPosMins[posPlayed] = (currentPosMins[posPlayed] || 0) + mins2ndHalf;
-              }
-            }
-            
-            const totalMatchMins = Math.floor((newTracker[p.id]?.totalSeconds || 0) / 60);
-            p.total_minutes_played = (p.total_minutes_played || 0) + totalMatchMins;
-            p.position_minutes = currentPosMins;
-            p.available = false; 
-
-            // Preserve POTM increment in final sheet state
-            if (winningPlayerIds.includes(String(p.id))) {
-              p.parent_motm = (p.parent_motm || 0) + 1;
-            }
-            
-            finalUpdates.push(
-              supabase.from('players')
-                .update({ 
-                  total_minutes_played: p.total_minutes_played, 
-                  position_minutes: currentPosMins, 
-                  available: false,
-                  parent_motm: p.parent_motm
-                })
-                .eq('id', p.id)
+              ]
             );
-          });
-
-          await Promise.all(finalUpdates);
-          setTeamSheet(updatedSheet);
-          setPlayerMinutesTracker({}); 
-          if (session?.user?.id) {
-            fetchTeamData(session.user.id, activeTeamId);
+          } else {
+            await finalizeFullTimeMatch();
           }
         }}
       ]);
@@ -1358,234 +1167,176 @@ export default function App() {
       ]);
     }
   };
-  // 📋 BATCH RSVP CONTROLLER (ADD ALL / REMOVE ALL)
-  async function batchToggleRSVP() {
-    if (!activeTeamId || !teamSheet || teamSheet.length === 0) return;
-    const allIn = teamSheet.every(p => p && p.available);
-    const targetStatus = !allIn; 
 
-    setTeamSheet(prev => (prev || []).map(p => p ? { ...p, available: targetStatus } : p));
+  const finalizeFullTimeMatch = async () => {
+    setMatchPhase('FULL-TIME');
+    setMatchStartTimestamp(null);
+    setAccumulatedSeconds(displaySeconds);
+    
+    feedbackFulltimeWhistle();
+    await broadcastEvent('🏁', 'Full-Time Whistle!');
 
-    const { error } = await supabase
-      .from('players')
-      .update({ available: targetStatus })
+    broadcastMatchSync({
+      matchPhase: 'FULL-TIME',
+      matchStartTimestamp: null,
+      accumulatedSeconds: displaySeconds
+    });
+
+    dispatchTeamMatchNotification({
+      teamId: activeTeamId,
+      senderUserId: session?.user?.id,
+      title: `🏁 Full-Time: ${teamScore} - ${opponentScore} vs ${opponentName}`,
+      body: `Final whistle! Result: ${teamScore} - ${opponentScore}. Tap to vote for Player of the Match! ⭐`,
+      data: { eventType: 'fulltime' }
+    });
+    
+    // Tally Fans' POTM Votes
+    const { data: votes } = await supabase
+      .from('parent_motm_votes')
+      .select('player_id')
       .eq('team_id', activeTeamId);
 
-    if (error) {
-      Alert.alert("RSVP Update Error", error.message);
-      fetchTeamData(session?.user?.id, activeTeamId);
-    }
-  }
+    const winningPlayerIds = [];
 
-  const startNewSeasonFlow = async () => {
-    if (seasonResetConfirmText.trim().toUpperCase() !== 'RESET SEASON') {
-      Alert.alert("Confirmation Error", "Please type 'RESET SEASON' accurately to proceed.");
-      return;
-    }
+    if (votes && votes.length > 0) {
+      const voteCounts = {};
+      let maxVotes = 0;
 
-    if (!activeTeamId) return;
-    setIsSavingSeason(true);
+      votes.forEach((v) => {
+        const pid = String(v.player_id);
+        voteCounts[pid] = (voteCounts[pid] || 0) + 1;
+        if (voteCounts[pid] > maxVotes) {
+          maxVotes = voteCounts[pid];
+        }
+      });
 
-    try {
-      const seasonLabel = getCurrentFootballSeason();
-      const generatedDate = formatUkDate();
-
-      const concludingAgeGroup = effectiveAgeGroup;
-      const concludingTeamName = activeTeamObj?.name || teamName || 'Squad';
-      
-      const totalMatches = matchHistory.length;
-      const wins = matchHistory.filter(m => m.result === 'W').length;
-      const draws = matchHistory.filter(m => m.result === 'D').length;
-      const losses = matchHistory.filter(m => m.result === 'L').length;
-      const goalsFor = matchHistory.reduce((sum, m) => sum + (m.team_score || 0), 0);
-      const goalsAgainst = matchHistory.reduce((sum, m) => sum + (m.opponent_score || 0), 0);
-      const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
-      const goalDiff = goalsFor - goalsAgainst;
-
-      const isAdult = String(concludingAgeGroup).toLowerCase().includes('adult');
-      const parentAwardTitle = isAdult ? "FPOTS" : "PPOTS";
-
-      const sortedByGoals = [...teamSheet].sort((a, b) => (b.goals || 0) - (a.goals || 0));
-      const sortedByAssists = [...teamSheet].sort((a, b) => (b.assists || 0) - (a.assists || 0));
-      const sortedByCoachPotm = [...teamSheet].sort((a, b) => (b.motm || 0) - (a.motm || 0));
-      const sortedByParentPotm = [...teamSheet].sort((a, b) => (b.parent_motm || 0) - (a.parent_motm || 0));
-
-      const topScorer = sortedByGoals[0]?.goals > 0 ? `${sortedByGoals[0].name} (${sortedByGoals[0].goals} Goals)` : 'N/A';
-      const topAssister = sortedByAssists[0]?.assists > 0 ? `${sortedByAssists[0].name} (${sortedByAssists[0].assists} Assists)` : 'N/A';
-      const topCoachPotm = sortedByCoachPotm[0]?.motm > 0 ? `${sortedByCoachPotm[0].name} (${sortedByCoachPotm[0].motm} Awards)` : 'N/A';
-      const topParentPotm = sortedByParentPotm[0]?.parent_motm > 0 ? `${sortedByParentPotm[0].name} (${sortedByParentPotm[0].parent_motm} Awards)` : 'N/A';
-
-      const vaultSnapshot = {
-        is_structured_json: true,
-        season_label: seasonLabel,
-        generated_date: generatedDate,
-        team_name: concludingTeamName,
-        age_group: concludingAgeGroup,
-        club_logo_url: activeTeamObj?.logo_url || teamLogoUrl || null,
-        scout_notes: scoutNotesInput || '',
-        record: { total_matches: totalMatches, wins, draws, losses, win_rate: winRate, goals_for: goalsFor, goals_against: goalsAgainst, goal_diff: goalDiff },
-        honours: { top_scorer: topScorer, top_assister: topAssister, top_coach_potm: topCoachPotm, top_parent_potm: topParentPotm, parent_award_title: parentAwardTitle },
-        squad_sheet: teamSheet.map(p => ({
-           id: p.id,
-           squad_number: p.squad_number || '-',
-           name: p.name,
-           position: p.position || 'N/A',
-           apps: p.apps || 0,
-           total_minutes_played: p.total_minutes_played || 0,
-           goals: p.goals || 0,
-           assists: p.assists || 0,
-           motm: p.motm || 0,
-           parent_motm: p.parent_motm || 0,
-        })),
-        match_history_archive: matchHistory.map(m => ({
-          created_at: m.created_at,
-          opponent: m.opponent_name || m.opponent || 'Opponent',
-          team_score: m.team_score ?? 0,
-          opponent_score: m.opponent_score ?? 0,
-          result: m.result || 'D',
-          match_type: m.match_type || 'Match'
-        }))
-      };
-
-      await supabase.from('season_reports').insert([{
-        team_id: activeTeamId,
-        season_label: seasonLabel,
-        report_text: JSON.stringify(vaultSnapshot),
-        created_at: new Date().toISOString()
-      }]);
-
-      try {
-        await generateSeasonPdfReport({
-          teamName: concludingTeamName,
-          ageGroup: concludingAgeGroup,
-          clubLogoUrl: activeTeamObj?.logo_url || teamLogoUrl || null,
-          teamSheet: teamSheet,
-          matchHistory: matchHistory,
-          scoutNotes: scoutNotesInput,
+      if (maxVotes > 0) {
+        Object.keys(voteCounts).forEach((pid) => {
+          if (voteCounts[pid] === maxVotes) {
+            winningPlayerIds.push(pid);
+          }
         });
-      } catch (shareErr) {
-        console.log("PDF Generation Warning:", shareErr);
+
+        const winningPlayers = (teamSheet || []).filter((p) =>
+          winningPlayerIds.includes(String(p.id))
+        );
+
+        for (const winner of winningPlayers) {
+          await adjustMatchStat(winner, 'parent_motm', 1);
+        }
+
+        if (winningPlayers.length === 1) {
+          await broadcastEvent(
+            '🌟',
+            `FANS' POTM: ${winningPlayers[0].name} (${maxVotes} Vote${maxVotes > 1 ? 's' : ''})`
+          );
+        } else if (winningPlayers.length > 1) {
+          const names = winningPlayers.map((w) => w.name).join(' & ');
+          await broadcastEvent(
+            '🌟',
+            `FANS' JOINT POTM: ${names} (${maxVotes} Votes Each)`
+          );
+        }
       }
+    }
+    
+    let resultStr = 'D';
+    if (teamScore > opponentScore) resultStr = 'W';
+    if (teamScore < opponentScore) resultStr = 'L';
+    
+    const matchPayload = {
+      team_id: activeTeamId,
+      opponent_name: opponentName || 'Opponent',
+      match_type: matchType,
+      team_score: teamScore,
+      opponent_score: opponentScore,
+      result: resultStr,
+      ticker_events: liveTicker || []
+    };
 
-      const nextAgeGroup = getNextAgeGroup(concludingAgeGroup);
-      const promotedTeamName = promoteTeamName(concludingTeamName, concludingAgeGroup, nextAgeGroup);
+    const { error: insertErr } = await supabase.from('match_history').insert([matchPayload]);
+    if (!insertErr) {
+      await supabase.from('live_ticker').delete().eq('team_id', activeTeamId);
+      await supabase.from('parent_motm_votes').delete().eq('team_id', activeTeamId);
 
-      const resetPlayerPromises = teamSheet.map(p => 
-        supabase.from('players').update({
-          apps: 0,
-          goals: 0,
-          assists: 0,
-          saves: 0,
-          clean_sheets: 0,
-          yellow_cards: 0,
-          red_cards: 0,
-          motm: 0,
-          parent_motm: 0,
-          training_attended: 0,
-          total_minutes_played: 0,
-          position_minutes: {}
-        }).eq('id', p.id)
-      );
+      resetMatchState();
+      setPendingHalfTimeSubs([]);
 
-      await supabase
-        .from('teams')
-        .update({ age_group: nextAgeGroup, name: promotedTeamName })
-        .eq('id', activeTeamId);
-
-      await Promise.all([
-        ...resetPlayerPromises,
-        supabase.from('match_history').delete().eq('team_id', activeTeamId),
-        supabase.from('live_ticker').delete().eq('team_id', activeTeamId),
-        supabase.from('parent_motm_votes').delete().eq('team_id', activeTeamId)
-      ]);
-
-      setTeamAgeGroup(nextAgeGroup);
-      setTeamName(promotedTeamName);
-      setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, age_group: nextAgeGroup, name: promotedTeamName } : t));
-
-      setIsSeasonResetModalOpen(false);
-      setSeasonResetConfirmText('');
-      setIsSavingSeason(false);
-
-      if (session?.user?.id) {
-        await fetchUserProfile(session.user.id);
-      }
-      fetchTeamData(session?.user?.id, activeTeamId);
+      Alert.alert("Match Finalized", "Report saved to Match Archive! Live pitch reset for your next match.");
       fetchMatchHistory(activeTeamId);
-      fetchSeasonReports(activeTeamId);
+    }
 
-      Alert.alert(
-        "New Season Activated! 🎆",
-        `Season summary archived to vault. Squad stats reset to 0, and team successfully promoted to ${nextAgeGroup}!`
+    const newTracker = { ...playerMinutesTracker };
+    const finalUpdates = [];
+    const updatedSheet = [...teamSheet];
+
+    updatedSheet.forEach(p => {
+      let mins2ndHalf = 0;
+      let currentPosMins = { ...(p.position_minutes || {}) };
+
+      if (p.is_starter && p.available && newTracker[p.id]) {
+        const elapsed2ndHalf = displaySeconds - (newTracker[p.id].lastOn || displaySeconds);
+        newTracker[p.id].totalSeconds += elapsed2ndHalf;
+        mins2ndHalf = Math.floor(elapsed2ndHalf / 60);
+      }
+      
+      if (mins2ndHalf > 0) {
+        const posPlayed = p.matchday_position;
+        if (posPlayed && posPlayed !== 'Bench') {
+           currentPosMins[posPlayed] = (currentPosMins[posPlayed] || 0) + mins2ndHalf;
+        }
+      }
+      
+      const totalMatchMins = Math.floor((newTracker[p.id]?.totalSeconds || 0) / 60);
+      p.total_minutes_played = (p.total_minutes_played || 0) + totalMatchMins;
+      p.position_minutes = currentPosMins;
+      p.available = false; 
+
+      if (winningPlayerIds.includes(String(p.id))) {
+        p.parent_motm = (p.parent_motm || 0) + 1;
+      }
+      
+      finalUpdates.push(
+        supabase.from('players')
+          .update({ 
+            total_minutes_played: p.total_minutes_played, 
+            position_minutes: currentPosMins, 
+            available: false,
+            parent_motm: p.parent_motm
+          })
+          .eq('id', p.id)
       );
+    });
 
-    } catch (err) {
-      setIsSavingSeason(false);
-      Alert.alert("Reset Error", err.message);
+    await Promise.all(finalUpdates);
+    setTeamSheet(updatedSheet);
+    setPlayerMinutesTracker({}); 
+    if (session?.user?.id) {
+      fetchTeamData(session.user.id, activeTeamId, activeContext?.role, activeContext?.childId);
     }
   };
 
-  const startArchiveGoalEdit = (matchRecord, eventIdx) => {
-    setEditingArchiveMatch(matchRecord);
-    setEditingArchiveEventIdx(eventIdx);
-    setSelectedArchiveScorer(null);
-    setArchiveEditStep('scorer');
+  const selectCoachMotm = async (player) => {
+    setLiveEventMode('none');
+    if (player && player.id) {
+      await adjustMatchStat(player, 'motm', 1);
+      await broadcastEvent('⭐', `COACH'S POTM: #${player.squad_number || ''} ${player.name}`);
+      Alert.alert("POTM Awarded", `${player.name} awarded Coach's Player of the Match!`);
+
+      // If the whistle was blown and awaiting this selection, finalize the match now
+      if (matchPhase === '2ND HALF' && !matchStartTimestamp) {
+        await finalizeFullTimeMatch();
+      }
+    }
   };
 
-  const selectArchiveScorer = (player) => {
-    setSelectedArchiveScorer(player);
-    setArchiveEditStep('assist');
-  };
-
-  const finishArchiveGoalEdit = async (assistPlayerOrNone) => {
-    if (!editingArchiveMatch || editingArchiveEventIdx === null || !selectedArchiveScorer) return;
-
-    const currentEvents = [...(editingArchiveMatch.ticker_events || [])];
-    const targetEvt = currentEvents[editingArchiveEventIdx];
-
-    const oldScorerMatch = targetEvt.message ? targetEvt.message.match(/GOAL!\s+(.*?)\s+⚽/) : null;
-    const oldScorerName = oldScorerMatch ? oldScorerMatch[1].trim() : null;
-
-    const oldAssistMatch = targetEvt.message ? targetEvt.message.match(/\(Assist:\s+(.*?)\)/) : null;
-    const oldAssistName = oldAssistMatch ? oldAssistMatch[1].trim() : null;
-    const newAssistName = (assistPlayerOrNone && assistPlayerOrNone !== 'None') ? assistPlayerOrNone.name : null;
-
-    if (oldScorerName && oldScorerName.toLowerCase() !== selectedArchiveScorer.name.toLowerCase()) {
-      const oldPlayer = (teamSheet || []).find(p => p.name.trim().toLowerCase() === oldScorerName.toLowerCase());
-      if (oldPlayer) await adjustMatchStat(oldPlayer, 'goals', -1);
-      await adjustMatchStat(selectedArchiveScorer, 'goals', 1);
-    }
-
-    if (oldAssistName && oldAssistName !== newAssistName) {
-      const oldAssistPlayer = (teamSheet || []).find(p => p.name.trim().toLowerCase() === oldAssistName.toLowerCase());
-      if (oldAssistPlayer) await adjustMatchStat(oldAssistPlayer, 'assists', -1);
-    }
-    if (newAssistName && oldAssistName !== newAssistName) {
-      await adjustMatchStat(assistPlayerOrNone, 'assists', 1);
-    }
-
-    let newMsg = `GOAL! ${selectedArchiveScorer.name} ⚽`;
-    if (newAssistName) {
-      newMsg += `\n(Assist: ${newAssistName})`;
-    }
-
-    currentEvents[editingArchiveEventIdx] = { ...targetEvt, message: newMsg };
-
-    const { error } = await supabase
-      .from('match_history')
-      .update({ ticker_events: currentEvents })
-      .eq('id', editingArchiveMatch.id);
-
-    if (error) {
-      Alert.alert("Update Error", error.message);
-    } else {
-      setMatchHistory(prev => prev.map(m => m.id === editingArchiveMatch.id ? { ...m, ticker_events: currentEvents } : m));
-      setArchiveEditStep('none');
-      setEditingArchiveMatch(null);
-      setEditingArchiveEventIdx(null);
-      setSelectedArchiveScorer(null);
-      Alert.alert("Event Updated", "Goal scorer, assist provider, and player stats updated!");
-      if (session) fetchTeamData(session.user.id, activeTeamId);
+  const selectParentMotm = async (player) => {
+    setLiveEventMode('none');
+    if (player && player.id && session?.user?.id && activeTeamId) {
+      setHasVotedMotm(true);
+      setVotedPlayerName(player.name);
+      await supabase.from('parent_motm_votes').insert([{ parent_id: session.user.id, player_id: player.id, team_id: activeTeamId }]);
+      Alert.alert("Vote Logged", `Your vote for ${player.name} has been securely logged!`);
     }
   };
 
@@ -1676,12 +1427,12 @@ export default function App() {
 
         updatedSheet = updatedSheet.map(p => {
           if (p.id === offPlayer.id) return { ...p, matchday_position: 'Bench', is_starter: false };
-          if (p.id === onPlayer.id) return { ...p, matchday_position: targetPos, is_starter: true };
+          if (p.id === onPlayer.id) return { ...p, matchday_position: targetPos, is_starter: true, apps: (p.apps || 0) + 1 };
           return p;
         });
 
         dbUpdates.push(supabase.from('players').update({ matchday_position: 'Bench', is_starter: false }).eq('id', offPlayer.id));
-        dbUpdates.push(supabase.from('players').update({ matchday_position: targetPos, is_starter: true }).eq('id', onPlayer.id));
+        dbUpdates.push(supabase.from('players').update({ matchday_position: targetPos, is_starter: true, apps: (onPlayer.apps || 0) + 1 }).eq('id', onPlayer.id));
       });
 
       return updatedSheet;
@@ -1753,6 +1504,7 @@ export default function App() {
     });
   };
 
+  // 🔄 SUBSTITUTION FIX (Initializes object structure to eliminate runtime crashes)
   const finalizeSubWithReason = async (reason) => {
     const { offPlayer, onPlayer } = subReasonModalState;
     setSubReasonModalState({ visible: false, offPlayer: null, onPlayer: null });
@@ -1766,42 +1518,25 @@ export default function App() {
     if (newTracker[offPlayer.id]) {
        newTracker[offPlayer.id].totalSeconds += (displaySeconds - newTracker[offPlayer.id].lastOn);
     }
+    
+    // CRITICAL FIX: Initializes tracker object before setting values
     if (!newTracker[onPlayer.id]) {
-       newTracker[onPlayer.id].totalSeconds = 0;
+       newTracker[onPlayer.id] = { totalSeconds: 0 };
     }
     newTracker[onPlayer.id].lastOn = displaySeconds;
     setPlayerMinutesTracker(newTracker);
 
     setTeamSheet(prev => prev.map(p => {
       if (p.id === offPlayer.id) return { ...p, matchday_position: 'Bench', is_starter: false };
-      if (p.id === onPlayer.id) return { ...p, matchday_position: onTargetPos, is_starter: true };
+      if (p.id === onPlayer.id) return { ...p, matchday_position: onTargetPos, is_starter: true, apps: (p.apps || 0) + 1 };
       return p;
     }));
 
     await supabase.from('players').update({ matchday_position: 'Bench', is_starter: false }).eq('id', offPlayer.id);
-    await supabase.from('players').update({ matchday_position: onTargetPos, is_starter: true }).eq('id', onPlayer.id);
+    await supabase.from('players').update({ matchday_position: onTargetPos, is_starter: true, apps: (onPlayer.apps || 0) + 1 }).eq('id', onPlayer.id);
 
     const min = `${Math.floor(displaySeconds / 60)}'`;
     await broadcastEvent('🔄', `Substitution: ${onPlayer.name} ON, ${offPlayer.name} OFF — [Reason: ${reason}]`, min);
-  };
-
-  const selectCoachMotm = async (player) => {
-    setLiveEventMode('none');
-    if (player && player.id) {
-      await adjustMatchStat(player, 'motm', 1);
-      await broadcastEvent('⭐', `COACH'S POTM: #${player.squad_number || ''} ${player.name}`);
-      Alert.alert("POTM Awarded", `${player.name} awarded Coach's Player of the Match!`);
-    }
-  };
-
-  const selectParentMotm = async (player) => {
-    setLiveEventMode('none');
-    if (player && player.id && session?.user?.id && activeTeamId) {
-      setHasVotedMotm(true);
-      setVotedPlayerName(player.name);
-      await supabase.from('parent_motm_votes').insert([{ parent_id: session.user.id, player_id: player.id, team_id: activeTeamId }]);
-      Alert.alert("Vote Logged", `Your vote for ${player.name} has been securely logged!`);
-    }
   };
 
   const openTafeModal = () => {
@@ -1984,7 +1719,6 @@ export default function App() {
     
     await Promise.all(autoFillUpdates);
 
-    // 📡 PEER REALTIME BROADCAST FOR TAFE FORMATION & ROSTER CHANGES
     if (activeTeamId) {
       try {
         const channel = supabase.channel(`team-realtime-${activeTeamId}`);
@@ -2003,6 +1737,236 @@ export default function App() {
     }
 
     Alert.alert("TAFE Executed", `Lineup optimized for ${formationName} using ${logicType} logic.`);
+  };
+  // 📋 BATCH RSVP CONTROLLER (ADD ALL / REMOVE ALL)
+  async function batchToggleRSVP() {
+    if (!activeTeamId || !teamSheet || teamSheet.length === 0) return;
+    const allIn = teamSheet.every(p => p && p.available);
+    const targetStatus = !allIn; 
+
+    setTeamSheet(prev => (prev || []).map(p => p ? { ...p, available: targetStatus } : p));
+
+    const { error } = await supabase
+      .from('players')
+      .update({ available: targetStatus })
+      .eq('team_id', activeTeamId);
+
+    if (error) {
+      Alert.alert("RSVP Update Error", error.message);
+      fetchTeamData(session?.user?.id, activeTeamId, activeContext?.role, activeContext?.childId);
+    }
+  }
+
+  const startNewSeasonFlow = async () => {
+    if (seasonResetConfirmText.trim().toUpperCase() !== 'RESET SEASON') {
+      Alert.alert("Confirmation Error", "Please type 'RESET SEASON' accurately to proceed.");
+      return;
+    }
+
+    if (!activeTeamId) return;
+    setIsSavingSeason(true);
+
+    try {
+      const seasonLabel = getCurrentFootballSeason();
+      const generatedDate = formatUkDate();
+
+      const concludingAgeGroup = effectiveAgeGroup;
+      const concludingTeamName = activeTeamObj?.name || teamName || 'Squad';
+      
+      const totalMatches = matchHistory.length;
+      const wins = matchHistory.filter(m => m.result === 'W').length;
+      const draws = matchHistory.filter(m => m.result === 'D').length;
+      const losses = matchHistory.filter(m => m.result === 'L').length;
+      const goalsFor = matchHistory.reduce((sum, m) => sum + (m.team_score || 0), 0);
+      const goalsAgainst = matchHistory.reduce((sum, m) => sum + (m.opponent_score || 0), 0);
+      const winRate = totalMatches > 0 ? Math.round((wins / totalMatches) * 100) : 0;
+      const goalDiff = goalsFor - goalsAgainst;
+
+      const isAdult = String(concludingAgeGroup).toLowerCase().includes('adult');
+      const parentAwardTitle = isAdult ? "FPOTS" : "PPOTS";
+
+      const sortedByGoals = [...teamSheet].sort((a, b) => (b.goals || 0) - (a.goals || 0));
+      const sortedByAssists = [...teamSheet].sort((a, b) => (b.assists || 0) - (a.assists || 0));
+      const sortedByCoachPotm = [...teamSheet].sort((a, b) => (b.motm || 0) - (a.motm || 0));
+      const sortedByParentPotm = [...teamSheet].sort((a, b) => (b.parent_motm || 0) - (a.parent_motm || 0));
+
+      const topScorer = sortedByGoals[0]?.goals > 0 ? `${sortedByGoals[0].name} (${sortedByGoals[0].goals} Goals)` : 'N/A';
+      const topAssister = sortedByAssists[0]?.assists > 0 ? `${sortedByAssists[0].name} (${sortedByAssists[0].assists} Assists)` : 'N/A';
+      const topCoachPotm = sortedByCoachPotm[0]?.motm > 0 ? `${sortedByCoachPotm[0].name} (${sortedByCoachPotm[0].motm} Awards)` : 'N/A';
+      const topParentPotm = sortedByParentPotm[0]?.parent_motm > 0 ? `${sortedByParentPotm[0].name} (${sortedByParentPotm[0].parent_motm} Awards)` : 'N/A';
+
+      const vaultSnapshot = {
+        is_structured_json: true,
+        season_label: seasonLabel,
+        generated_date: generatedDate,
+        team_name: concludingTeamName,
+        age_group: concludingAgeGroup,
+        club_logo_url: activeTeamObj?.logo_url || teamLogoUrl || null,
+        scout_notes: scoutNotesInput || '',
+        record: { total_matches: totalMatches, wins, draws, losses, win_rate: winRate, goals_for: goalsFor, goals_against: goalsAgainst, goal_diff: goalDiff },
+        honours: { top_scorer: topScorer, top_assister: topAssister, top_coach_potm: topCoachPotm, top_parent_potm: topParentPotm, parent_award_title: parentAwardTitle },
+        squad_sheet: teamSheet.map(p => ({
+           id: p.id,
+           squad_number: p.squad_number || '-',
+           name: p.name,
+           position: p.position || 'N/A',
+           apps: p.apps || 0,
+           total_minutes_played: p.total_minutes_played || 0,
+           goals: p.goals || 0,
+           assists: p.assists || 0,
+           motm: p.motm || 0,
+           parent_motm: p.parent_motm || 0,
+        })),
+        match_history_archive: matchHistory.map(m => ({
+          created_at: m.created_at,
+          opponent: m.opponent_name || m.opponent || 'Opponent',
+          team_score: m.team_score ?? 0,
+          opponent_score: m.opponent_score ?? 0,
+          result: m.result || 'D',
+          match_type: m.match_type || 'Match'
+        }))
+      };
+
+      await supabase.from('season_reports').insert([{
+        team_id: activeTeamId,
+        season_label: seasonLabel,
+        report_text: JSON.stringify(vaultSnapshot),
+        created_at: new Date().toISOString()
+      }]);
+
+      try {
+        await generateSeasonPdfReport({
+          teamName: concludingTeamName,
+          ageGroup: concludingAgeGroup,
+          clubLogoUrl: activeTeamObj?.logo_url || teamLogoUrl || null,
+          teamSheet: teamSheet,
+          matchHistory: matchHistory,
+          scoutNotes: scoutNotesInput,
+        });
+      } catch (shareErr) {
+        console.log("PDF Generation Warning:", shareErr);
+      }
+
+      const nextAgeGroup = getNextAgeGroup(concludingAgeGroup);
+      const promotedTeamName = promoteTeamName(concludingTeamName, concludingAgeGroup, nextAgeGroup);
+
+      const resetPlayerPromises = teamSheet.map(p => 
+        supabase.from('players').update({
+          apps: 0,
+          goals: 0,
+          assists: 0,
+          saves: 0,
+          clean_sheets: 0,
+          yellow_cards: 0,
+          red_cards: 0,
+          motm: 0,
+          parent_motm: 0,
+          training_attended: 0,
+          total_minutes_played: 0,
+          position_minutes: {}
+        }).eq('id', p.id)
+      );
+
+      await supabase
+        .from('teams')
+        .update({ age_group: nextAgeGroup, name: promotedTeamName })
+        .eq('id', activeTeamId);
+
+      await Promise.all([
+        ...resetPlayerPromises,
+        supabase.from('match_history').delete().eq('team_id', activeTeamId),
+        supabase.from('live_ticker').delete().eq('team_id', activeTeamId),
+        supabase.from('parent_motm_votes').delete().eq('team_id', activeTeamId)
+      ]);
+
+      setTeamAgeGroup(nextAgeGroup);
+      setTeamName(promotedTeamName);
+      setMyTeams(prev => prev.map(t => t.id === activeTeamId ? { ...t, age_group: nextAgeGroup, name: promotedTeamName } : t));
+
+      setIsSeasonResetModalOpen(false);
+      setSeasonResetConfirmText('');
+      setIsSavingSeason(false);
+
+      if (session?.user?.id) {
+        await fetchUserProfile(session.user.id);
+      }
+      fetchTeamData(session?.user?.id, activeTeamId, activeContext?.role, activeContext?.childId);
+      fetchMatchHistory(activeTeamId);
+      fetchSeasonReports(activeTeamId);
+
+      Alert.alert(
+        "New Season Activated! 🎆",
+        `Season summary archived to vault. Squad stats reset to 0, and team successfully promoted to ${nextAgeGroup}!`
+      );
+
+    } catch (err) {
+      setIsSavingSeason(false);
+      Alert.alert("Reset Error", err.message);
+    }
+  };
+
+  const startArchiveGoalEdit = (matchRecord, eventIdx) => {
+    setEditingArchiveMatch(matchRecord);
+    setEditingArchiveEventIdx(eventIdx);
+    setSelectedArchiveScorer(null);
+    setArchiveEditStep('scorer');
+  };
+
+  const selectArchiveScorer = (player) => {
+    setSelectedArchiveScorer(player);
+    setArchiveEditStep('assist');
+  };
+
+  const finishArchiveGoalEdit = async (assistPlayerOrNone) => {
+    if (!editingArchiveMatch || editingArchiveEventIdx === null || !selectedArchiveScorer) return;
+
+    const currentEvents = [...(editingArchiveMatch.ticker_events || [])];
+    const targetEvt = currentEvents[editingArchiveEventIdx];
+
+    const oldScorerMatch = targetEvt.message ? targetEvt.message.match(/GOAL!\s+(.*?)\s+⚽/) : null;
+    const oldScorerName = oldScorerMatch ? oldScorerMatch[1].trim() : null;
+
+    const oldAssistMatch = targetEvt.message ? targetEvt.message.match(/\(Assist:\s+(.*?)\)/) : null;
+    const oldAssistName = oldAssistMatch ? oldAssistMatch[1].trim() : null;
+    const newAssistName = (assistPlayerOrNone && assistPlayerOrNone !== 'None') ? assistPlayerOrNone.name : null;
+
+    if (oldScorerName && oldScorerName.toLowerCase() !== selectedArchiveScorer.name.toLowerCase()) {
+      const oldPlayer = (teamSheet || []).find(p => p.name.trim().toLowerCase() === oldScorerName.toLowerCase());
+      if (oldPlayer) await adjustMatchStat(oldPlayer, 'goals', -1);
+      await adjustMatchStat(selectedArchiveScorer, 'goals', 1);
+    }
+
+    if (oldAssistName && oldAssistName !== newAssistName) {
+      const oldAssistPlayer = (teamSheet || []).find(p => p.name.trim().toLowerCase() === oldAssistName.toLowerCase());
+      if (oldAssistPlayer) await adjustMatchStat(oldAssistPlayer, 'assists', -1);
+    }
+    if (newAssistName && oldAssistName !== newAssistName) {
+      await adjustMatchStat(assistPlayerOrNone, 'assists', 1);
+    }
+
+    let newMsg = `GOAL! ${selectedArchiveScorer.name} ⚽`;
+    if (newAssistName) {
+      newMsg += `\n(Assist: ${newAssistName})`;
+    }
+
+    currentEvents[editingArchiveEventIdx] = { ...targetEvt, message: newMsg };
+
+    const { error } = await supabase
+      .from('match_history')
+      .update({ ticker_events: currentEvents })
+      .eq('id', editingArchiveMatch.id);
+
+    if (error) {
+      Alert.alert("Update Error", error.message);
+    } else {
+      setMatchHistory(prev => prev.map(m => m.id === editingArchiveMatch.id ? { ...m, ticker_events: currentEvents } : m));
+      setArchiveEditStep('none');
+      setEditingArchiveMatch(null);
+      setEditingArchiveEventIdx(null);
+      setSelectedArchiveScorer(null);
+      Alert.alert("Event Updated", "Goal scorer, assist provider, and player stats updated!");
+      if (session) fetchTeamData(session.user.id, activeTeamId, activeContext?.role, activeContext?.childId);
+    }
   };
 
   async function createTeamFlow() {
@@ -2074,6 +2038,83 @@ export default function App() {
       setActiveTeamId(data[0].id);
       setIsCreateTeamModalOpen(false);
       setNewTeamName('');
+      fetchUserProfile(session.user.id);
+    }
+  }
+
+  // 🔗 UNIVERSAL CODE REDEMPTION & PARENT-GATED LOGIC
+  async function handleJoinCode(inputCode) {
+    if (!inputCode || !inputCode.trim()) {
+      Alert.alert("Input Required", "Please enter a valid Join Code.");
+      return false;
+    }
+    const cleanCode = inputCode.trim().toUpperCase();
+    setLoading(true);
+
+    try {
+      // 1. Head Coach Code
+      const { data: headTeam } = await supabase.from('teams').select('*').eq('invite_code', cleanCode).maybeSingle();
+      if (headTeam) {
+        await supabase.from('team_staff').upsert([{ team_id: headTeam.id, user_id: session.user.id, role: 'coach' }], { onConflict: 'team_id,user_id' });
+        await fetchUserProfile(session.user.id);
+        Alert.alert("Team Linked! ⚽", `You have successfully joined ${headTeam.name} as Head Coach.`);
+        return true;
+      }
+
+      // 2. Staff Code
+      const { data: staffTeam } = await supabase.from('teams').select('*').eq('staff_code', cleanCode).maybeSingle();
+      if (staffTeam) {
+        await supabase.from('team_staff').upsert([{ team_id: staffTeam.id, user_id: session.user.id, role: 'assistant' }], { onConflict: 'team_id,user_id' });
+        await fetchUserProfile(session.user.id);
+        Alert.alert("Team Linked! ⚽", `You have successfully joined ${staffTeam.name} as Assistant Coach.`);
+        return true;
+      }
+
+      // 3. Admin Code
+      const { data: adminTeam } = await supabase.from('teams').select('*').eq('admin_code', cleanCode).maybeSingle();
+      if (adminTeam) {
+        await supabase.from('team_staff').upsert([{ team_id: adminTeam.id, user_id: session.user.id, role: 'admin' }], { onConflict: 'team_id,user_id' });
+        await fetchUserProfile(session.user.id);
+        Alert.alert("Team Linked! 📋", `You have successfully joined ${adminTeam.name} as Team Administrator.`);
+        return true;
+      }
+
+      // 4. Dedicated Player Activation Code (Parent-Gated)
+      const { data: playerCodeMatch } = await supabase.from('players').select('*, teams(*)').eq('player_activation_code', cleanCode).maybeSingle();
+      if (playerCodeMatch) {
+        await supabase.from('players').update({ user_id: session.user.id, player_activation_code: null }).eq('id', playerCodeMatch.id);
+        await supabase.from('profiles').update({ role: 'player', role_configured: true }).eq('id', session.user.id);
+        await fetchUserProfile(session.user.id);
+        Alert.alert("Player Account Activated! 🌟", `Welcome ${playerCodeMatch.name}! You are now connected to ${playerCodeMatch.teams?.name || 'your team'}.`);
+        return true;
+      }
+
+      // 5. Parent Family Code
+      const { data: player } = await supabase.from('players').select('*, teams(id, name)').eq('family_code', cleanCode).maybeSingle();
+      if (player) {
+        await supabase.from('parent_players').upsert([{ player_id: player.id, parent_id: session.user.id, is_primary: true }], { onConflict: 'player_id,parent_id' });
+        await fetchUserProfile(session.user.id);
+        const teamTitle = player.teams?.name || 'Squad';
+        Alert.alert("Player Linked! 👨‍👩‍👦", `Successfully linked ${player.name} (${teamTitle}) to your parent account.`);
+        return true;
+      }
+
+      // 6. Fan Code
+      const { data: fanTeam } = await supabase.from('teams').select('*').eq('fan_code', cleanCode).maybeSingle();
+      if (fanTeam) {
+        setActiveTeamId(fanTeam.id);
+        await fetchUserProfile(session.user.id);
+        Alert.alert("Joined as Fan! 📣", `You are now following ${fanTeam.name}.`);
+        return true;
+      }
+
+      Alert.alert("Invalid Code", `No team or player found with code: ${cleanCode}. Please verify with your Head Coach or Parent.`);
+      return false;
+    } catch (err) {
+      Alert.alert("Linking Error", err?.message || "Failed to join team.");
+      return false;
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -2116,7 +2157,7 @@ export default function App() {
     if (!error) {
       setNewPlayerName(''); setNewSquadNumber(''); setNewPlayerPosition('GK/SGK'); setNewSecondaryPosition('None'); setNewPlayerFootedness(3);
       setIsAddPlayerModalOpen(false); setIsSidebarOpen(false);
-      if (session) fetchTeamData(session.user.id, activeTeamId);
+      if (session) fetchTeamData(session.user.id, activeTeamId, activeContext?.role, activeContext?.childId);
     }
   }
 
@@ -2126,7 +2167,7 @@ export default function App() {
     const { error } = await supabase.from('players').update(editingPlayer).eq('id', editingPlayer.id);
     if (!error) {
       setEditingPlayer(null);
-      if (session) fetchTeamData(session.user.id, activeTeamId);
+      if (session) fetchTeamData(session.user.id, activeTeamId, activeContext?.role, activeContext?.childId);
     }
   }
 
@@ -2149,7 +2190,7 @@ export default function App() {
     if (!error) {
       setPlayerToDelete(null);
       setDeleteConfirmText('');
-      if (session) fetchTeamData(session.user.id, activeTeamId);
+      if (session) fetchTeamData(session.user.id, activeTeamId, activeContext?.role, activeContext?.childId);
     }
   };
 
@@ -2173,7 +2214,7 @@ export default function App() {
               Alert.alert("Error", error.message);
             } else {
               Alert.alert("Access Revoked", "Parent access successfully removed.");
-              if (session) fetchTeamData(session.user.id, activeTeamId);
+              if (session) fetchTeamData(session.user.id, activeTeamId, activeContext?.role, activeContext?.childId);
             }
           }
         }
@@ -2195,7 +2236,7 @@ export default function App() {
       supabase.from('match_history').delete().eq('team_id', teamId),
       supabase.from('live_ticker').delete().eq('team_id', teamId),
       supabase.from('match_notes').delete().eq('team_id', teamId),
-      supabase.from('parent_motm_votes').delete().eq('team_id', teamId),
+      supabase.from('parent_motm_votes').delete().eq('team_id', activeTeamId),
       supabase.from('season_reports').delete().eq('team_id', teamId)
     ]);
 
@@ -2204,19 +2245,7 @@ export default function App() {
     if (!error) {
       setTeamToDelete(null);
       setDeleteTeamConfirmText('');
-      
-      const remainingTeams = myTeams.filter(t => t.id !== teamId);
-      setMyTeams(remainingTeams);
-      
-      if (remainingTeams.length > 0) {
-        setActiveTeamId(remainingTeams[0].id);
-        if (remainingTeams[0].age_group) setTeamAgeGroup(remainingTeams[0].age_group);
-      } else {
-        setActiveTeamId(null);
-        await supabase.from('profiles').update({ role_configured: false }).eq('id', session.user.id);
-        setProfile(prev => prev ? { ...prev, role_configured: false } : null);
-        setOnboardingStep('choose_path');
-      }
+      fetchUserProfile(session?.user?.id);
     } else {
       Alert.alert("Deletion Error", error.message);
     }
@@ -2247,11 +2276,10 @@ export default function App() {
 
     const cleanUrl = faLeagueUrl.trim();
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('teams')
       .update({ fa_league_table_url: cleanUrl })
-      .eq('id', activeTeamId)
-      .select();
+      .eq('id', activeTeamId);
 
     if (error) {
       Alert.alert("Database Error", error.message);
@@ -2272,11 +2300,10 @@ export default function App() {
 
     const cleanUrl = teamLogoUrl.trim();
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('teams')
       .update({ logo_url: cleanUrl })
-      .eq('id', activeTeamId)
-      .select();
+      .eq('id', activeTeamId);
 
     if (error) {
       Alert.alert("Database Error", error.message);
@@ -2288,35 +2315,56 @@ export default function App() {
     Alert.alert("Saved!", "Team logo URL updated and saved permanently.");
   }
 
-  async function fetchTeamData(userId, teamId) {
+  // 🛡️ STRICT DATA ISOLATION QUERY: Scoped strictly by role & linked player (Superuser bypasses isolation)
+  async function fetchTeamData(userId, teamId, role = activeContext?.role, childId = activeContext?.childId) {
     if (!teamId) return;
-    const { data: allPlayers } = await supabase.from('players').select('*').eq('team_id', teamId).order('name', { ascending: true });
-    const resolvedPlayers = allPlayers || [];
-    setTeamSheet(resolvedPlayers);
+    setIsLoadingSheet(true);
 
-    const initialRegister = { __initialized: true };
-    resolvedPlayers.forEach(p => { if (p && p.id) initialRegister[p.id] = true; });
-    setTrainingRegister(initialRegister);
-
-    const { data: links } = await supabase.from('parent_players').select('player_id').eq('parent_id', userId);
-    if (links && links.length > 0) {
-      const linkedIds = links.map(l => l.player_id);
+    if (role === 'parent' && !isSuperUser) {
+      const { data: links } = await supabase.from('parent_players').select('player_id').eq('parent_id', userId);
+      const linkedIds = (links || []).map(l => l.player_id);
       const { data: children } = await supabase.from('players').select('*').in('id', linkedIds).eq('team_id', teamId).order('name', { ascending: true });
-      setMyLinkedPlayers(children || []);
-      if (children && children.length > 0) setMyChildId(children[0].id);
+      const scopedPlayers = children || [];
+      setTeamSheet(scopedPlayers);
+      setMyLinkedPlayers(scopedPlayers);
+      if (scopedPlayers.length > 0) {
+        const activeChild = scopedPlayers.find(c => c.id === childId) || scopedPlayers[0];
+        setMyChildId(activeChild.id);
+        setActivePlayerId(activeChild.id);
+      }
+    } else if (role === 'player' && !isSuperUser) {
+      const { data: playerRow } = await supabase.from('players').select('*').eq('id', childId).single();
+      const scoped = playerRow ? [playerRow] : [];
+      setTeamSheet(scoped);
+      setMyLinkedPlayers(scoped);
+      if (playerRow) {
+        setMyChildId(playerRow.id);
+        setActivePlayerId(playerRow.id);
+      }
     } else {
-      setMyLinkedPlayers([]);
-      setMyChildId(null);
+      // Coach, Staff, or SUPERUSER in Parent/Player mode (Fetches full squad)
+      const { data: allPlayers } = await supabase.from('players').select('*').eq('team_id', teamId).order('name', { ascending: true });
+      const resolvedPlayers = allPlayers || [];
+      setTeamSheet(resolvedPlayers);
+
+      // For Superuser, also fetch linked children if any exist so activeChildId/myChildId can be populated
+      const { data: links } = await supabase.from('parent_players').select('player_id').eq('parent_id', userId);
+      const linkedIds = (links || []).map(l => l.player_id);
+      const linkedChildren = resolvedPlayers.filter(p => linkedIds.includes(p.id));
+      setMyLinkedPlayers(linkedChildren.length > 0 ? linkedChildren : resolvedPlayers);
+
+      if (resolvedPlayers.length > 0 && !activePlayerId) {
+        const defaultPlayer = childId ? resolvedPlayers.find(p => p.id === childId) : resolvedPlayers[0];
+        setActivePlayerId(defaultPlayer ? defaultPlayer.id : resolvedPlayers[0].id);
+      }
     }
-    
-    if (resolvedPlayers && resolvedPlayers.length > 0) setActivePlayerId(resolvedPlayers[0].id);
     setIsLoadingSheet(false);
   }
 
   async function toggleRSVP(player) {
     if (!player || !player.id) return;
     await supabase.from('players').update({ available: !player.available }).eq('id', player.id);
-    fetchTeamData(session?.user?.id, activeTeamId);
+    fetchTeamData(session?.user?.id, activeTeamId, activeContext?.role, activeContext?.childId);
   }
 
   async function assignPlayerRole(player, newMatchPos, isStarter) {
@@ -2330,7 +2378,7 @@ export default function App() {
       await broadcastEvent('🔁', `TACTICAL SWITCH ${min}: ${player.name} moved from ${oldPos} to ${newMatchPos}`);
     }
 
-    fetchTeamData(session?.user?.id, activeTeamId);
+    fetchTeamData(session?.user?.id, activeTeamId, activeContext?.role, activeContext?.childId);
     setLineupAssignPlayer(null);
   }
 
@@ -2355,7 +2403,7 @@ export default function App() {
     const resetReg = { __initialized: true };
     (teamSheet || []).forEach(p => { if (p && p.id) resetReg[p.id] = true; });
     setTrainingRegister(resetReg);
-    if (session) fetchTeamData(session.user.id, activeTeamId);
+    if (session) fetchTeamData(session.user.id, activeTeamId, activeContext?.role, activeContext?.childId);
   };
 
   const logLiveSave = async () => {
@@ -2381,21 +2429,21 @@ export default function App() {
   const shareCoParentInvite = (childName, code) => {
     const deepLink = Linking.createURL('join', { queryParams: { code } });
     Share.share({
-      message: `Hey! Join our team app for ${childName || 'our player'}.\n\n1. Download the app / Expo Go\n2. Tap this link to open directly with your join code: ${deepLink}\n\nOr manually enter Join Code: ${code}`,
+      message: `Hey! Join our team app for ${childName || 'our player'}.\n\n1. Download the app / Expo Go\n2. Tap link: ${deepLink}\n\nOr enter Join Code: ${code}`,
     });
   };
 
   const shareFanInvite = (childName, code) => {
     const deepLink = Linking.createURL('join', { queryParams: { code } });
     Share.share({
-      message: `Hey! Join our team app as a Fan to follow live matches and vote for Player of the Match!\n\nTap link to join: ${deepLink}\nOr enter Code: ${code}`,
+      message: `Hey! Join our team app as a Fan to follow live matches and vote for Player of the Match!\n\nTap link: ${deepLink}\nOr enter Code: ${code}`,
     });
   };
 
   const shareStaffInvite = (teamName, code) => {
     const deepLink = Linking.createURL('join', { queryParams: { code } });
     Share.share({
-      message: `Hey! Join ${teamName || 'our team'} as Staff / Assistant Coach.\n\nTap link to join: ${deepLink}\nOr enter Staff Code: ${code}`,
+      message: `Hey! Join ${teamName || 'our team'} as Staff / Assistant Coach.\n\nTap link: ${deepLink}\nOr enter Staff Code: ${code}`,
     });
   };
 
@@ -2522,12 +2570,14 @@ export default function App() {
       Alert.alert("PDF Export Error", err?.message || 'Could not export archived PDF.');
     }
   };
+
   const SUPABASE_LOGO_URL = 'https://jnogngcywfgitzryooig.supabase.co/storage/v1/object/public/app-assets/Tactical%20Engine%20Logo.png';
+
   if (loading) {
     return (
       <SafeAreaProvider>
         <SafeAreaView style={styles.splashContainer} edges={['top', 'bottom']}>
-          <StatusBar barStyle="light-content" backgroundColor="#0B0E14" />
+          <StatusBar barStyle="light-content" />
           <View style={styles.splashCenterBox}>
             <Image
               source={{ uri: SUPABASE_LOGO_URL }}
@@ -2546,7 +2596,7 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <SafeAreaView style={styles.authContainer} edges={['top', 'bottom']}>
-          <StatusBar barStyle="light-content" backgroundColor="#0B0E14" />
+          <StatusBar barStyle="light-content" />
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
             <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
               <View style={styles.authBox}>
@@ -2623,7 +2673,7 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <SafeAreaView style={styles.authContainer} edges={['top', 'bottom']}>
-          <StatusBar barStyle="light-content" backgroundColor="#0B0E14" />
+          <StatusBar barStyle="light-content" />
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
             <ScrollView contentContainerStyle={styles.scrollAuthContainer} keyboardShouldPersistTaps="handled">
               <View style={styles.authBox}>
@@ -2639,7 +2689,7 @@ export default function App() {
 
                     <TouchableOpacity style={[styles.wizardOptionBtn, { borderColor: '#3b82f6' }]} onPress={() => setOnboardingStep('parent_notice')}>
                       <Text style={[styles.wizardOptionTitle, { color: '#3b82f6' }]}>🔑 Join Existing Team</Text>
-                      <Text style={styles.wizardOptionSub}>Enter a Join Code provided by your Head Coach.</Text>
+                      <Text style={styles.wizardOptionSub}>Enter a Join Code provided by your Head Coach or Parent.</Text>
                     </TouchableOpacity>
                   </>
                 )}
@@ -2726,7 +2776,7 @@ export default function App() {
                   <>
                     <View style={{ backgroundColor: '#0B0E14', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#3b82f6', marginBottom: 15 }}>
                       <Text style={{ color: '#ffffff', fontSize: 13, lineHeight: 18, textAlign: 'center' }}>
-                        📢 <Text style={{ fontWeight: 'bold', color: '#3b82f6' }}>Notice:</Text> Enter the code provided by your Head Coach.
+                        📢 <Text style={{ fontWeight: 'bold', color: '#3b82f6' }}>Notice:</Text> Enter the code provided by your Head Coach or Parent.
                       </Text>
                     </View>
 
@@ -2753,10 +2803,10 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
-        <StatusBar barStyle="light-content" backgroundColor="#0B0E14" translucent={false} />
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <StatusBar barStyle="light-content" />
         
-        {/* TOP HEADER BAR WITH DYNAMIC CONTEXTUAL ROLE SELECTOR */}
+        {/* TOP HEADER BAR */}
         <View style={styles.masterToggleBar}>
           <TouchableOpacity style={styles.menuTriggerBtn} onPress={() => setIsSidebarOpen(true)}>
             <Text style={styles.menuTriggerIcon}>☰</Text>
@@ -2774,18 +2824,18 @@ export default function App() {
               </TouchableOpacity>
             )}
 
-            {(isParentForActiveTeam || !isStaffForActiveTeam || isSuperUser) && (
+            {(isParentForActiveTeam || isSuperUser) && (
               <TouchableOpacity 
-                style={[styles.masterToggleBtn, (appMode === 'parent' || appMode === 'fan') && styles.masterToggleBtnActive]} 
+                style={[styles.masterToggleBtn, appMode === 'parent' && styles.masterToggleBtnActive]} 
                 onPress={() => handleModeSwitch('parent')}
               >
-                <Text style={[styles.masterToggleBtnText, (appMode === 'parent' || appMode === 'fan') && styles.masterToggleBtnTextActive]}>
+                <Text style={[styles.masterToggleBtnText, appMode === 'parent' && styles.masterToggleBtnTextActive]}>
                   {isAdultTeam ? 'FAN' : 'PARENT'}
                 </Text>
               </TouchableOpacity>
             )}
 
-            {(isParentForActiveTeam || isSuperUser) && (
+            {(isPlayerForActiveTeam || isSuperUser) && (
               <TouchableOpacity 
                 style={[styles.masterToggleBtn, appMode === 'player' && styles.masterToggleBtnActive]} 
                 onPress={() => handleModeSwitch('player')}
@@ -2802,35 +2852,56 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* 🌐 UNIVERSAL MULTI-TEAM SELECTOR BAR */}
-        {(myTeams.length > 1 || (appMode === 'coach' && myTeams.length > 0)) && (
-          <View style={styles.teamSelectorBar}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {myTeams.map(t => (
-                <TouchableOpacity 
-                  key={t.id} 
-                  style={[styles.teamTab, activeTeamId === t.id && styles.teamTabActive]}
-                  onPress={() => {
-                    setActiveTeamId(t.id);
-                    const ageGrp = t.age_group || 'U16';
-                    setTeamAgeGroup(ageGrp);
-
-                    const is9v9 = ['U13'].includes(String(ageGrp).toUpperCase());
-                    setActiveFormation(t.default_formation || (is9v9 ? '3-3-2' : '4-2-3-1'));
-
-                    const staffOnNew = isSuperUser || t.created_by === session?.user?.id || userStaffLinks.some(s => s.team_id === t.id);
-                    if (!staffOnNew && appMode === 'coach') {
-                      setAppMode('parent');
-                      setCurrentTab('player');
-                    }
-                  }}
-                >
-                  <Text style={[styles.teamTabText, activeTeamId === t.id && styles.teamTabTextActive]}>
-                    {t.name} ({t.age_group || 'U16'})
-                  </Text>
-                </TouchableOpacity>
-              ))}
+        {/* 🛡️ MULTI-ROLE CONTEXT PILLS (SUPER USER MODEL) */}
+        {availableContexts.length > 0 && (
+          <View style={styles.contextPillBar}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 10, gap: 8 }}>
+              {availableContexts.map(ctx => {
+                const isActive = activeContext?.id === ctx.id;
+                return (
+                  <TouchableOpacity
+                    key={ctx.id}
+                    style={[styles.contextPill, isActive && styles.contextPillActive]}
+                    onPress={() => switchContext(ctx)}
+                  >
+                    <Text style={[styles.contextPillText, isActive && styles.contextPillTextActive]}>
+                      {ctx.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
+          </View>
+        )}
+
+        {/* 🟢 DEDICATED LIVE MATCH SCOREBOARD BANNER (SPECTATORS / PARENTS / PLAYERS) */}
+        {(appMode === 'parent' || appMode === 'player') && (matchPhase === '1ST HALF' || matchPhase === '2ND HALF' || matchPhase === 'HALF-TIME' || matchPhase === 'FULL-TIME') && (
+          <View style={styles.liveScoreboardBanner}>
+            <View style={styles.scoreboardTopRow}>
+              <View style={styles.liveIndicatorBadge}>
+                <View style={[styles.liveDot, matchPhase === 'FULL-TIME' && { backgroundColor: '#ef4444' }]} />
+                <Text style={styles.liveIndicatorText}>
+                  {matchPhase === 'FULL-TIME' ? 'FULL TIME' : matchPhase === 'HALF-TIME' ? 'HALF TIME' : `LIVE • ${matchPhase}`}
+                </Text>
+              </View>
+              <Text style={styles.scoreboardTimerText}>
+                ⏱️ {Math.floor(displaySeconds / 60)}'
+              </Text>
+            </View>
+
+            <View style={styles.scoreboardMainRow}>
+              <Text style={styles.scoreboardTeamText} numberOfLines={1}>
+                {activeTeamObj?.name || 'Our Team'}
+              </Text>
+              <View style={styles.scorePill}>
+                <Text style={styles.scoreDigits}>
+                  {teamScore} - {opponentScore}
+                </Text>
+              </View>
+              <Text style={[styles.scoreboardTeamText, { textAlign: 'right' }]} numberOfLines={1}>
+                {opponentName || 'Opposition'}
+              </Text>
+            </View>
           </View>
         )}
 
@@ -2841,6 +2912,7 @@ export default function App() {
             <PlayerProfileScreen
               myLinkedPlayers={myLinkedPlayers}
               teamSheet={teamSheet}
+              isSuperUser={isSuperUser}
               activePlayerId={activePlayerId}
               setActivePlayerId={setActivePlayerId}
               activeFormation={activeFormation}
@@ -3027,8 +3099,8 @@ export default function App() {
 
         </View>
 
-        {/* BOTTOM NAVIGATION WITH ANDROID SYSTEM BAR PADDING */}
-        <View style={styles.bottomNav}>
+        {/* BOTTOM NAVIGATION WITH HARDWARE SAFE BAR PADDING */}
+        <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           {(appMode === 'player' || appMode === 'parent') && (
             <>
               <TouchableOpacity style={styles.navButton} onPress={() => setCurrentTab('player')}>
@@ -3080,12 +3152,12 @@ export default function App() {
           )}
         </View>
 
-        {/* 📁 EXECUTIVE SEASON VAULT MODAL (LOWERED CLOSE BUTTON FOR SAFE AREA) */}
+        {/* 📁 EXECUTIVE SEASON VAULT MODAL */}
         <Modal visible={isSeasonArchiveOpen} transparent={true} animationType="slide">
           <View style={styles.modalOverlayFull}>
             <SafeAreaView style={{ flex: 1, width: '100%', backgroundColor: '#0B0E14' }} edges={['top', 'bottom']}>
               
-              <View style={[styles.safeModalHeader, { borderBottomWidth: 1, borderBottomColor: '#2E3A44', backgroundColor: '#0B0E14' }]}>
+              <View style={[styles.safeModalHeader, { paddingTop: Math.max(insets.top, 20) + 8, borderBottomWidth: 1, borderBottomColor: '#2E3A44', backgroundColor: '#0B0E14' }]}>
                 <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>📁 Season Vault Archive</Text>
                 <TouchableOpacity 
                   onPress={() => { setViewingSeasonReport(null); setIsSeasonArchiveOpen(false); }} 
@@ -3393,7 +3465,7 @@ export default function App() {
           onClose={() => setIsNotesStagingModalOpen(false)}
           teamSheet={teamSheet}
           activeTeamId={activeTeamId}
-          onNotesPushed={() => fetchTeamData(session?.user?.id, activeTeamId)}
+          onNotesPushed={() => fetchTeamData(session?.user?.id, activeTeamId, activeContext?.role, activeContext?.childId)}
         />
 
         <EditPlayerProfileModal
@@ -3439,10 +3511,10 @@ export default function App() {
           generatePlayerReportCard={generatePlayerReportCard}
         />
 
-        {/* 🏆 FA LEAGUE TABLE MODAL (LOWERED CLOSE BUTTON FOR SAFE AREA) */}
+        {/* 🏆 FA LEAGUE TABLE MODAL (HARDWARE-AWARE SAFE BOUNDARY) */}
         <Modal visible={isFaWebviewOpen} animationType="slide">
           <SafeAreaView style={{ flex: 1, backgroundColor: '#0B0E14' }} edges={['top', 'bottom']}>
-            <View style={[styles.safeModalHeader, { borderBottomWidth: 1, borderBottomColor: '#2E3A44' }]}>
+            <View style={[styles.safeModalHeader, { paddingTop: Math.max(insets.top, 20) + 8, borderBottomWidth: 1, borderBottomColor: '#2E3A44' }]}>
               <Text style={{ color: '#39FF14', fontSize: 18, fontWeight: 'bold' }}>🏆 FA League Table</Text>
               <TouchableOpacity onPress={() => setIsFaWebviewOpen(false)} style={styles.modalClosePill}>
                 <Text style={{ color: '#ffffff', fontWeight: 'bold' }}>Close</Text>
@@ -3679,11 +3751,11 @@ export default function App() {
           </View>
         </Modal>
 
-        {/* COMMAND MENU SIDEBAR DRAWER */}
+        {/* 🧭 COMMAND MENU SIDEBAR DRAWER (UNIFIED HARDWARE SAFE BOUNDARY) */}
         <Modal visible={isSidebarOpen} transparent={true} animationType="fade">
           <View style={styles.sidebarOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setIsSidebarOpen(false)} />
-            <View style={styles.sidebarDrawer}>
+            <View style={[styles.sidebarDrawer, { paddingTop: Math.max(insets.top, 24) + 8, paddingBottom: Math.max(insets.bottom, 16) }]}>
               <View style={styles.sidebarHeader}>
                 <Text style={styles.sidebarTitle}>COMMAND MENU</Text>
                 <TouchableOpacity style={styles.sidebarCloseTouchable} onPress={() => setIsSidebarOpen(false)}>
@@ -3702,7 +3774,7 @@ export default function App() {
                             seedFullTeamRoster({
                               activeTeamId,
                               activeTeamName: activeTeamObj?.name,
-                              fetchTeamData,
+                              fetchTeamData: () => fetchTeamData(session?.user?.id, activeTeamId, activeContext?.role, activeContext?.childId),
                               userId: session?.user?.id,
                               setLoading
                             });
@@ -3719,7 +3791,7 @@ export default function App() {
                               activeTeamId,
                               activeTeamName: activeTeamObj?.name,
                               teamSheet,
-                              fetchTeamData,
+                              fetchTeamData: () => fetchTeamData(session?.user?.id, activeTeamId, activeContext?.role, activeContext?.childId),
                               fetchMatchHistory,
                               userId: session?.user?.id,
                               setLoading
@@ -3911,14 +3983,25 @@ const styles = StyleSheet.create({
   signOutBtn: { backgroundColor: '#ef4444', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   signOutBtnText: { color: '#ffffff', fontSize: 11, fontWeight: 'bold' },
 
-  teamSelectorBar: { backgroundColor: '#1A1F26', borderBottomWidth: 1, borderBottomColor: '#2E3A44', paddingVertical: 8, paddingHorizontal: 10 },
-  teamTab: { paddingHorizontal: 15, paddingVertical: 6, borderRadius: 20, backgroundColor: '#0B0E14', marginRight: 10, borderWidth: 1, borderColor: '#2E3A44' },
-  teamTabActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
-  teamTabText: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold' },
-  teamTabTextActive: { color: '#0B0E14' },
+  contextPillBar: { backgroundColor: '#141922', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#2E3A44' },
+  contextPill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: '#0B0E14', borderWidth: 1, borderColor: '#2E3A44', alignItems: 'center' },
+  contextPillActive: { backgroundColor: '#39FF14', borderColor: '#39FF14' },
+  contextPillText: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold' },
+  contextPillTextActive: { color: '#0B0E14' },
+
+  liveScoreboardBanner: { backgroundColor: '#1A1F26', padding: 12, borderBottomWidth: 2, borderBottomColor: '#39FF14' },
+  scoreboardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  liveIndicatorBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0B0E14', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, borderWidth: 1, borderColor: '#2E3A44' },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#39FF14' },
+  liveIndicatorText: { color: '#ffffff', fontSize: 10, fontWeight: 'bold' },
+  scoreboardTimerText: { color: '#39FF14', fontSize: 12, fontWeight: 'bold' },
+  scoreboardMainRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 4 },
+  scoreboardTeamText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold', flex: 1 },
+  scorePill: { backgroundColor: '#0B0E14', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#39FF14', marginHorizontal: 8 },
+  scoreDigits: { color: '#39FF14', fontSize: 16, fontWeight: 'bold' },
 
   sidebarOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', flexDirection: 'row' },
-  sidebarDrawer: { width: '80%', backgroundColor: '#1A1F26', height: '100%', padding: 20, borderRightWidth: 1, borderRightColor: '#2E3A44', zIndex: 5 },
+  sidebarDrawer: { width: '80%', backgroundColor: '#1A1F26', height: '100%', paddingHorizontal: 20, borderRightWidth: 1, borderRightColor: '#2E3A44', zIndex: 5 },
   sidebarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#2E3A44', paddingBottom: 10 },
   sidebarTitle: { color: '#39FF14', fontSize: 18, fontWeight: 'bold' },
   sidebarCloseTouchable: { backgroundColor: '#0B0E14', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: '#2E3A44' },
@@ -3946,7 +4029,7 @@ const styles = StyleSheet.create({
   addPlayerBtnText: { color: '#0B0E14', fontWeight: 'bold', fontSize: 13 },
   sectionHeaderModal: { color: '#39FF14', fontSize: 13, fontWeight: 'bold', marginTop: 10, marginBottom: 10, textTransform: 'uppercase', alignSelf: 'flex-start', borderBottomWidth: 1, borderBottomColor: '#2E3A44', paddingBottom: 4, width: '100%' },
 
-  bottomNav: { flexDirection: 'row', backgroundColor: '#1A1F26', paddingBottom: 20, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#2E3A44' },
+  bottomNav: { flexDirection: 'row', backgroundColor: '#1A1F26', paddingTop: 12, borderTopWidth: 1, borderTopColor: '#2E3A44' },
   navButton: { flex: 1, alignItems: 'center' },
   navIcon: { fontSize: 18, color: '#64748b' },
   navText: { fontSize: 10, color: '#64748b', fontWeight: 'bold', marginTop: 2 },
@@ -3970,17 +4053,9 @@ const styles = StyleSheet.create({
   footDot: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#2E3A44', backgroundColor: '#1A1F26' },
   footDotActive: { borderColor: '#39FF14', backgroundColor: '#39FF14' },
 
-  statCounterRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#2E3A44', width: '100%' },
-  statCounterLabel: { color: '#cbd5e1', fontWeight: 'bold', fontSize: 13 },
-  counterBtn: { backgroundColor: '#2E3A44', width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#64748b' },
-  counterBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 18 },
-  statValueText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14, minWidth: 40, textAlign: 'center' },
-
   liveActionBtn: { backgroundColor: '#0B0E14', paddingVertical: 15, paddingHorizontal: 10, borderRadius: 10, width: '45%', alignItems: 'center', borderWidth: 1, borderColor: '#2E3A44' },
-  liveActionBtnRow: { backgroundColor: '#0B0E14', paddingVertical: 15, paddingHorizontal: 15, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: '#2E3A44', width: '100%', alignItems: 'center' },
   liveActionIcon: { fontSize: 24, marginBottom: 5 },
   liveActionText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
-  liveActionTextRow: { color: '#ffffff', fontWeight: 'bold', fontSize: 16 },
   
   benchBtn: { backgroundColor: '#ca8a04', padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 10, marginTop: 25, width: '100%' },
   benchBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14 },
@@ -3994,7 +4069,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 22 : 14,
     paddingBottom: 14,
     backgroundColor: '#0B0E14'
   },

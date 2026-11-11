@@ -79,9 +79,30 @@ export default function LiveMatchScreen({
   const sinBins = useMatchdayStore((state) => state.sinBins || []);
   const removeSinBin = useMatchdayStore((state) => state.removeSinBin);
 
+  // Multi-Staff Permission Check (Coaches, Admins, and Assistants share live match management)
+  const isStaff = appMode === 'coach' || appMode === 'admin' || appMode === 'assistant';
+
   const isGameActive = matchPhase === '1ST HALF' || matchPhase === '2ND HALF';
   const isPreMatch = matchPhase === 'PRE-MATCH';
   const isHalfTime = matchPhase === 'HALF-TIME';
+
+  // ⚡ AUTO-RECOVERY & REALTIME WHISTLE DETECTOR (Prevents devices getting stuck on "Awaiting")
+  useEffect(() => {
+    if (!liveTicker || liveTicker.length === 0) return;
+
+    const latestWhistle = liveTicker.find(e => e.icon === '⏱️' || e.icon === '🛑' || e.icon === '🏁');
+    if (latestWhistle && latestWhistle.message) {
+      if (latestWhistle.message.includes('1st Half Kick-Off') && matchPhase === 'PRE-MATCH') {
+        useMatchdayStore.getState().setMatchPhase('1ST HALF');
+      } else if (latestWhistle.message.includes('Half-Time') && matchPhase !== 'HALF-TIME' && matchPhase !== '2ND HALF' && matchPhase !== 'FULL-TIME') {
+        useMatchdayStore.getState().setMatchPhase('HALF-TIME');
+      } else if (latestWhistle.message.includes('2nd Half Kick-Off') && matchPhase !== '2ND HALF' && matchPhase !== 'FULL-TIME') {
+        useMatchdayStore.getState().setMatchPhase('2ND HALF');
+      } else if (latestWhistle.message.includes('Full-Time') && matchPhase !== 'FULL-TIME') {
+        useMatchdayStore.getState().setMatchPhase('FULL-TIME');
+      }
+    }
+  }, [liveTicker, matchPhase]);
 
   // 💡 KEEP-AWAKE INTEGRATION (PREVENTS SCREEN SLEEP DURING MATCHES)
   useEffect(() => {
@@ -122,12 +143,12 @@ export default function LiveMatchScreen({
     } else if (isHalfTime) {
       Alert.alert(
         "Half-Time Interval",
-        "Live play is currently paused. Tap 'Half-Time Team Talk & Bulk Subs' to plan changes for the 2nd half."
+        "Live play is paused. Use 'Half-Time Team Talk & Bulk Subs' to stage tactical changes for the 2nd half."
       );
     } else {
       Alert.alert(
         "Match Concluded",
-        "The match has finished. Reset the match to start a new fixture."
+        "The match has finished. Reset the match to record your next fixture."
       );
     }
   };
@@ -177,7 +198,7 @@ export default function LiveMatchScreen({
   return (
     <View style={{ flex: 1, backgroundColor: '#0B0E14' }}>
       
-      {/* HEADER: PHASE & TIMER */}
+      {/* HEADER: PHASE & RUNNING CLOCK */}
       <View style={styles.liveHeader}>
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -186,7 +207,8 @@ export default function LiveMatchScreen({
           </View>
           <Text style={styles.clockText}>{formatTime(displaySeconds)}</Text>
         </View>
-        {appMode === 'coach' && (
+        
+        {isStaff && (
           <TouchableOpacity 
             style={[
               styles.phaseBtn,
@@ -217,7 +239,7 @@ export default function LiveMatchScreen({
 
       {/* SCOREBOARD CONTAINER */}
       <View style={styles.scoreboardContainer}>
-        {isPreMatch && appMode === 'coach' && (
+        {isPreMatch && isStaff && (
           <View style={{ marginBottom: 12 }}>
             <TextInput 
               style={[
@@ -225,9 +247,9 @@ export default function LiveMatchScreen({
                 !opponentName.trim() && { borderColor: '#39FF14', borderWidth: 2, backgroundColor: 'rgba(57,255,20,0.15)' }
               ]} 
               placeholder="Enter Opponent Name (Required)..." 
-              placeholderTextColor={!opponentName.trim() ? '#39FF14' : '#64748b'}
-              value={opponentName}
-              onChangeText={setOpponentName}
+              placeholderTextColor={!opponentName.trim() ? '#39FF14' : '#64748b'} 
+              value={opponentName} 
+              onChangeText={setOpponentName} 
             />
             {/* 3-WAY MATCH TYPE SELECTOR */}
             <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 4 }}>
@@ -311,7 +333,7 @@ export default function LiveMatchScreen({
       )}
 
       {/* HALF-TIME BULK SUBSTITUTIONS BANNER */}
-      {isHalfTime && appMode === 'coach' && (
+      {isHalfTime && isStaff && (
         <TouchableOpacity style={styles.halfTimeActionCard} onPress={openHalfTimeSubModal}>
           <View style={{ flex: 1 }}>
             <Text style={styles.htCardTitle}>🔄 Half-Time Team Talk & Bulk Subs</Text>
@@ -321,8 +343,8 @@ export default function LiveMatchScreen({
         </TouchableOpacity>
       )}
 
-      {/* TOP ACTION BUTTONS (LOCKED OUTSIDE ACTIVE PLAY) */}
-      {appMode === 'coach' && (
+      {/* COLLABORATIVE STAFF ACTION BUTTONS */}
+      {isStaff && (
         <View style={styles.liveActionHeader}>
           {/* LOG GOAL */}
           <TouchableOpacity 
@@ -339,18 +361,18 @@ export default function LiveMatchScreen({
             </Text>
           </TouchableOpacity>
 
-          {/* DISCIPLINARY */}
+          {/* DISCIPLINARY (Available during active play and half-time) */}
           <TouchableOpacity 
             style={[
               styles.topActionBtn, 
               { borderColor: '#eab308' }, 
-              !isGameActive && styles.btnDisabled
+              (!isGameActive && !isHalfTime) && styles.btnDisabled
             ]} 
-            onPress={isGameActive ? initCardFlow : handleDisabledAction}
-            activeOpacity={isGameActive ? 0.7 : 1}
+            onPress={(isGameActive || isHalfTime) ? initCardFlow : handleDisabledAction}
+            activeOpacity={(isGameActive || isHalfTime) ? 0.7 : 1}
           >
-            <Text style={[styles.topActionText, !isGameActive && { color: '#64748b' }]}>
-              {isGameActive ? '⚠️ Disciplinary' : '🔒 Disciplinary'}
+            <Text style={[styles.topActionText, (!isGameActive && !isHalfTime) && { color: '#64748b' }]}>
+              {(isGameActive || isHalfTime) ? '⚠️ Disciplinary' : '🔒 Disciplinary'}
             </Text>
           </TouchableOpacity>
 
@@ -374,9 +396,11 @@ export default function LiveMatchScreen({
       {/* LIVE EVENT TICKER STREAM */}
       <View style={styles.tickerContainer}>
         {(liveTicker || []).length === 0 ? (
-          <Text style={[styles.bulletText, { textAlign: 'center', marginTop: 15 }]}>
-            Awaiting Kick-Off...
-          </Text>
+          <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+            <Text style={[styles.bulletText, { textAlign: 'center', color: '#94a3b8' }]}>
+              {isPreMatch ? '⏱️ Awaiting Kick-Off...' : '⚡ Match underway • No live events logged yet'}
+            </Text>
+          </View>
         ) : (
           <ScrollView style={{ padding: 10 }}>
             {(liveTicker || []).map((evt, idx) => {
@@ -394,7 +418,7 @@ export default function LiveMatchScreen({
       </View>
 
       {/* PITCH ROSTER & BENCH */}
-      {appMode === 'coach' && (
+      {isStaff && (
         <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.rosterHeaderRow}>
             <Text style={styles.sectionHeaderModal}>
@@ -408,7 +432,7 @@ export default function LiveMatchScreen({
           {/* OUTFIELD PAIRS (2-COLUMN BALANCED GRID) */}
           <View style={styles.outfieldGrid}>
             {outfieldStarters.length === 0 && gkStarters.length === 0 ? (
-              <Text style={{ color: '#64748b' }}>No starters selected.</Text>
+              <Text style={{ color: '#64748b' }}>No starters assigned to pitch.</Text>
             ) : null}
 
             {outfieldStarters.map((p) => (
@@ -435,7 +459,7 @@ export default function LiveMatchScreen({
             ))}
           </View>
 
-          {/* GOALKEEPER FULL-WIDTH BOTTOM BUTTON */}
+          {/* GOALKEEPER FULL-WIDTH CARD */}
           {gkStarters.map((p) => (
             <TouchableOpacity 
               key={p.id} 
@@ -464,7 +488,7 @@ export default function LiveMatchScreen({
             </TouchableOpacity>
           ))}
 
-          {/* BENCH SUBS */}
+          {/* BENCH SUBSTITUTES */}
           <Text style={[styles.sectionHeaderModal, { marginTop: 24 }]}>
             BENCH (SUBS - {eligibleSubs.length})
           </Text>
@@ -502,7 +526,7 @@ export default function LiveMatchScreen({
             ))}
           </View>
 
-          {/* 🟥 PERMANENTLY SENT OFF (DISMISSED) PLAYERS */}
+          {/* 🟥 PERMANENTLY SENT OFF PLAYERS */}
           {sentOffPlayers.length > 0 && (
             <>
               <Text style={[styles.sectionHeaderModal, { marginTop: 24, color: '#ef4444' }]}>

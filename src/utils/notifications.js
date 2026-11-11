@@ -76,24 +76,68 @@ export async function registerForPushNotificationsAsync(userId) {
 }
 
 /**
- * Dispatches a push notification to all followers/parents of a specific squad
+ * Dispatches a push notification to all staff, parents, and players linked to a squad
  */
 export async function dispatchTeamMatchNotification({ teamId, senderUserId, title, body, data = {} }) {
   if (!teamId) return;
 
   try {
-    // 1. Query target follower tokens from Supabase RPC
-    const { data: tokenRows, error } = await supabase.rpc('get_team_push_tokens', {
-      target_team_id: teamId,
-      sender_user_id: senderUserId || null,
+    const targetUserIds = new Set();
+
+    // 1. Fetch Staff User IDs (Coaches, Admins, Assistants)
+    const { data: staffRows } = await supabase
+      .from('team_staff')
+      .select('user_id')
+      .eq('team_id', teamId);
+
+    (staffRows || []).forEach((s) => {
+      if (s.user_id) targetUserIds.add(s.user_id);
     });
 
-    if (error || !tokenRows || tokenRows.length === 0) return;
+    // 2. Fetch Parent User IDs (Linked to any player on this team)
+    const { data: playerRows } = await supabase
+      .from('players')
+      .select('id, user_id')
+      .eq('team_id', teamId);
 
-    const pushTokens = tokenRows.map((r) => r.expo_push_token).filter(Boolean);
+    const playerIds = (playerRows || []).map((p) => p.id);
+
+    // Also notify dedicated player accounts
+    (playerRows || []).forEach((p) => {
+      if (p.user_id) targetUserIds.add(p.user_id);
+    });
+
+    if (playerIds.length > 0) {
+      const { data: parentRows } = await supabase
+        .from('parent_players')
+        .select('parent_id')
+        .in('player_id', playerIds);
+
+      (parentRows || []).forEach((pr) => {
+        if (pr.parent_id) targetUserIds.add(pr.parent_id);
+      });
+    }
+
+    // 3. Exclude the sender so they don't get an alert for their own tap
+    if (senderUserId) {
+      targetUserIds.delete(senderUserId);
+    }
+
+    const uniqueUserIds = Array.from(targetUserIds);
+    if (uniqueUserIds.length === 0) return;
+
+    // 4. Query all active push tokens for these target users
+    const { data: tokenRows, error: tokenErr } = await supabase
+      .from('user_push_tokens')
+      .select('expo_push_token')
+      .in('user_id', uniqueUserIds);
+
+    if (tokenErr || !tokenRows || tokenRows.length === 0) return;
+
+    const pushTokens = Array.from(new Set(tokenRows.map((r) => r.expo_push_token).filter(Boolean)));
     if (pushTokens.length === 0) return;
 
-    // 2. Build Expo Push API payloads (High priority, background wake-up)
+    // 5. Build Expo Push API payloads
     const messages = pushTokens.map((token) => ({
       to: token,
       sound: 'default',
@@ -104,16 +148,20 @@ export async function dispatchTeamMatchNotification({ teamId, senderUserId, titl
       data: { ...data, teamId },
     }));
 
-    // 3. Dispatch to Expo Push Service
-    await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Accept-Encoding': 'gzip, deflate',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(messages),
-    });
+    // 6. Dispatch to Expo Push Service (Chunks of 100)
+    const chunkSize = 100;
+    for (let i = 0; i < messages.length; i += chunkSize) {
+      const chunk = messages.slice(i, i + chunkSize);
+      await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-Encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(chunk),
+      });
+    }
   } catch (err) {
     console.warn("Failed to dispatch match push notification:", err);
   }
