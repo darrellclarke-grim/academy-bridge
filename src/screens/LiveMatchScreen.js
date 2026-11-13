@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Platform,
@@ -53,10 +53,15 @@ export default function LiveMatchScreen({
   subs = [],
   openHalfTimeSubModal
 }) {
+  const [fixtureSaveStatus, setFixtureSaveStatus] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
+  const isDirtyRef = useRef(false);
+
   // 🛡️ ISOLATE STATE WHEN TEAM CHANGES
   useEffect(() => {
     if (activeTeamObj?.id) {
       useMatchdayStore.getState().setActiveTeamId(activeTeamObj.id);
+      isDirtyRef.current = false;
+      setFixtureSaveStatus('idle');
     }
   }, [activeTeamObj?.id]);
 
@@ -85,6 +90,64 @@ export default function LiveMatchScreen({
   const isGameActive = matchPhase === '1ST HALF' || matchPhase === '2ND HALF';
   const isPreMatch = matchPhase === 'PRE-MATCH';
   const isHalfTime = matchPhase === 'HALF-TIME';
+
+  // 💾 PERSIST PRE-MATCH FIXTURE (OPPONENT & MATCH TYPE) TO SUPABASE
+  const persistPreMatchFixture = async (nextOpponent, nextMatchType) => {
+    const teamId = activeTeamObj?.id;
+    if (!teamId || !isStaff || !isPreMatch) return;
+
+    setFixtureSaveStatus('saving');
+    const payload = {
+      matchPhase: 'PRE-MATCH',
+      opponentName: (nextOpponent || '').trim(),
+      matchType: nextMatchType || 'League',
+      teamScore: 0,
+      opponentScore: 0,
+      matchStartTimestamp: null,
+      accumulatedSeconds: 0,
+      displaySeconds: 0
+    };
+
+    try {
+      const { error } = await supabase
+        .from('teams')
+        .update({ live_match_state: payload })
+        .eq('id', teamId);
+
+      if (error) throw error;
+
+      // Broadcast live update to any connected parent/fan/player devices
+      const channel = supabase.channel(`team-realtime-${teamId}`);
+      await channel.send({
+        type: 'broadcast',
+        event: 'match_state_sync',
+        payload
+      });
+
+      isDirtyRef.current = false;
+      setFixtureSaveStatus('saved');
+    } catch (err) {
+      console.warn('Fixture save warning:', err?.message);
+      setFixtureSaveStatus('error');
+    }
+  };
+
+  // Debounced auto-save 600ms after coach stops typing opponent name
+  useEffect(() => {
+    if (!isDirtyRef.current || !isPreMatch || !isStaff || !activeTeamObj?.id) return;
+
+    setFixtureSaveStatus('saving');
+    const timer = setTimeout(() => {
+      persistPreMatchFixture(opponentName, matchType);
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [opponentName, matchType, isPreMatch, isStaff, activeTeamObj?.id]);
+
+  const handleSelectMatchType = (type) => {
+    setMatchType(type);
+    persistPreMatchFixture(opponentName, type);
+  };
 
   // ⚡ AUTO-RECOVERY & REALTIME WHISTLE DETECTOR (Prevents devices getting stuck on "Awaiting")
   useEffect(() => {
@@ -249,29 +312,53 @@ export default function LiveMatchScreen({
               placeholder="Enter Opponent Name (Required)..." 
               placeholderTextColor={!opponentName.trim() ? '#39FF14' : '#64748b'} 
               value={opponentName} 
-              onChangeText={setOpponentName} 
+              onChangeText={(text) => {
+                isDirtyRef.current = true;
+                setOpponentName(text);
+              }}
+              onBlur={() => {
+                if (isDirtyRef.current) {
+                  persistPreMatchFixture(opponentName, matchType);
+                }
+              }}
+              returnKeyType="done"
             />
             {/* 3-WAY MATCH TYPE SELECTOR */}
             <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 4 }}>
               <TouchableOpacity 
                 style={[styles.fmtBtn, matchType === 'League' && styles.fmtBtnActive, { flex: 1, paddingVertical: 8, paddingHorizontal: 2 }]}
-                onPress={() => setMatchType('League')}
+                onPress={() => handleSelectMatchType('League')}
               >
                 <Text style={[styles.fmtBtnText, matchType === 'League' && styles.fmtBtnTextActive]} numberOfLines={1}>🏆 League</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 style={[styles.fmtBtn, matchType === 'Cup' && styles.fmtBtnActive, { flex: 1, paddingVertical: 8, paddingHorizontal: 2 }]}
-                onPress={() => setMatchType('Cup')}
+                onPress={() => handleSelectMatchType('Cup')}
               >
                 <Text style={[styles.fmtBtnText, matchType === 'Cup' && styles.fmtBtnTextActive]} numberOfLines={1}>🥊 Cup</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 style={[styles.fmtBtn, matchType === 'Friendly' && styles.fmtBtnActive, { flex: 1, paddingVertical: 8, paddingHorizontal: 2 }]}
-                onPress={() => setMatchType('Friendly')}
+                onPress={() => handleSelectMatchType('Friendly')}
               >
                 <Text style={[styles.fmtBtnText, matchType === 'Friendly' && styles.fmtBtnTextActive]} numberOfLines={1}>🤝 Friendly</Text>
               </TouchableOpacity>
             </View>
+
+            {/* CLOUD SYNC STATUS INDICATOR */}
+            {fixtureSaveStatus !== 'idle' && (
+              <Text style={{
+                textAlign: 'center',
+                fontSize: 11,
+                fontWeight: 'bold',
+                marginTop: 6,
+                color: fixtureSaveStatus === 'saved' ? '#39FF14' : fixtureSaveStatus === 'error' ? '#ef4444' : '#94a3b8'
+              }}>
+                {fixtureSaveStatus === 'saving' && '⏳ Saving upcoming fixture to cloud...'}
+                {fixtureSaveStatus === 'saved' && '☁️ Upcoming fixture saved & visible to squad'}
+                {fixtureSaveStatus === 'error' && '⚠️ Offline — fixture will sync when reconnected'}
+              </Text>
+            )}
           </View>
         )}
 
@@ -541,7 +628,7 @@ export default function LiveMatchScreen({
                     onPress={() => {
                       Alert.alert(
                         "Player Sent Off",
-                        `#${p.squad_number} ${p.name} was permanently dismissed via Red Card and cannot re-enter the match.`
+                        `#${p.squadNumber} ${p.name} was permanently dismissed via Red Card and cannot re-enter the match.`
                       );
                     }}
                   >

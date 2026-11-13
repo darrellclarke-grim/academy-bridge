@@ -463,17 +463,30 @@ export default function App() {
   async function broadcastMatchSync(statePayload) {
     if (!activeTeamId) return;
     try {
+      const current = useMatchdayStore.getState();
+      const fullSnapshot = {
+        matchPhase: current.matchPhase,
+        opponentName: current.opponentName,
+        matchType: current.matchType,
+        teamScore: current.teamScore,
+        opponentScore: current.opponentScore,
+        matchStartTimestamp: current.matchStartTimestamp,
+        accumulatedSeconds: current.accumulatedSeconds,
+        displaySeconds: current.displaySeconds,
+        ...statePayload
+      };
+
       // 1. Instant peer-to-peer broadcast across team channel
       const channel = supabase.channel(`team-realtime-${activeTeamId}`);
       await channel.send({
         type: 'broadcast',
         event: 'match_state_sync',
-        payload: statePayload
+        payload: fullSnapshot
       });
       
-      // 2. Commit live match state directly to Supabase
+      // 2. Commit complete live match state snapshot to Supabase
       await supabase.from('teams').update({
-         live_match_state: statePayload
+        live_match_state: fullSnapshot
       }).eq('id', activeTeamId);
       
     } catch (err) {
@@ -755,10 +768,13 @@ export default function App() {
 
       if (teamData && teamData.live_match_state) {
         const state = teamData.live_match_state;
+
+        // Always restore mid-week fixture prep (Opponent & Match Type) even in PRE-MATCH
+        if (state.opponentName !== undefined) setOpponentName(state.opponentName);
+        if (state.matchType !== undefined) setMatchType(state.matchType);
+
         if (state.matchPhase && state.matchPhase !== 'PRE-MATCH') {
           setMatchPhase(state.matchPhase);
-          if (state.opponentName) setOpponentName(state.opponentName);
-          if (state.matchType) setMatchType(state.matchType);
           if (state.teamScore !== undefined) setTeamScore(state.teamScore);
           if (state.opponentScore !== undefined) setOpponentScore(state.opponentScore);
           if (state.accumulatedSeconds !== undefined) setAccumulatedSeconds(state.accumulatedSeconds);
@@ -1112,9 +1128,10 @@ export default function App() {
           setMatchStartTimestamp(null);
           setAccumulatedSeconds(displaySeconds);
 
-          // 2. Check if a Coach's POTM has been awarded during this game
-          const hasAwardedCoachPotm = (teamSheet || []).some(p => (p.motm || 0) > 0) ||
-            (liveTicker || []).some(e => e.icon === '⭐' && e.message && e.message.includes("COACH'S POTM"));
+          // 2. Check if a Coach's POTM has been awarded during THIS match
+          const hasAwardedCoachPotm = (liveTicker || []).some(
+            e => e.icon === '⭐' && e.message && e.message.includes("COACH'S POTM")
+          );
 
           if (!hasAwardedCoachPotm) {
             // Prompt coach to pick POTM before ending
@@ -1146,6 +1163,8 @@ export default function App() {
         { text: "Reset", style: "destructive", onPress: async () => {
             feedbackFulltimeWhistle();
             resetMatchState();
+            setHasVotedMotm(false);
+            setVotedPlayerName('');
             setPendingHalfTimeSubs([]);
             setPlayerMinutesTracker({});
             await supabase.from('live_ticker').delete().eq('team_id', activeTeamId);
@@ -1153,6 +1172,8 @@ export default function App() {
             
             broadcastMatchSync({
               matchPhase: 'PRE-MATCH',
+              opponentName: '',
+              matchType: 'League',
               teamScore: 0,
               opponentScore: 0,
               matchStartTimestamp: null,
@@ -1260,7 +1281,19 @@ export default function App() {
       await supabase.from('parent_motm_votes').delete().eq('team_id', activeTeamId);
 
       resetMatchState();
+      setHasVotedMotm(false);
+      setVotedPlayerName('');
       setPendingHalfTimeSubs([]);
+      await broadcastMatchSync({
+        matchPhase: 'PRE-MATCH',
+        opponentName: '',
+        matchType: 'League',
+        teamScore: 0,
+        opponentScore: 0,
+        matchStartTimestamp: null,
+        accumulatedSeconds: 0,
+        displaySeconds: 0
+      });
 
       Alert.alert("Match Finalized", "Report saved to Match Archive! Live pitch reset for your next match.");
       fetchMatchHistory(activeTeamId);

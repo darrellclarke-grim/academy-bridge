@@ -130,7 +130,7 @@ export default function PlayerProfileScreen({
           });
         }
       });
-  }, [activeTeamId, currentPhase]);
+  }, [activeTeamId, currentPhase, storeOpponentName, storeMatchType]);
 
   useEffect(() => {
     if ((appMode === 'parent' || isAdultFanMode) && (currentActiveTab === 'roles' || (isAdultFanMode && currentActiveTab !== 'overview'))) {
